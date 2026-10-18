@@ -1,9 +1,18 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import type { Character, Nest, Run } from '../api/types';
 import type { Tab } from '../lib/navigation';
+import { filterByName, isFilterActive } from '../lib/search';
 import { useAppState } from '../state/context';
 import { CharacterToggleCard } from '../components/CharacterToggleCard';
 import { EmptyState } from '../components/EmptyState';
+import { FilterStatus } from '../components/FilterStatus';
 import { LoadingState } from '../components/LoadingState';
+import { NoMatchState } from '../components/NoMatchState';
+import { SearchField } from '../components/SearchField';
+
+const EMPTY_CHARACTERS: Character[] = [];
+const EMPTY_NESTS: Nest[] = [];
+const EMPTY_RUNS: Run[] = [];
 
 export function RunPage({
   onNavigate,
@@ -12,6 +21,44 @@ export function RunPage({
 }) {
   const { state, loading, setRun, pendingRuns } = useAppState();
   const [selectedNestId, setSelectedNestId] = useState<number | null>(null);
+  const [nestQuery, setNestQuery] = useState('');
+  const [characterQuery, setCharacterQuery] = useState('');
+
+  const characters = state?.characters ?? EMPTY_CHARACTERS;
+  const nests = state?.nests ?? EMPTY_NESTS;
+  const runs = state?.runs ?? EMPTY_RUNS;
+
+  const selected = useMemo(
+    () => nests.find((nest) => nest.id === selectedNestId) ?? nests[0],
+    [nests, selectedNestId],
+  );
+  const selectedId = selected?.id;
+
+  const visibleNests = useMemo(
+    () => filterByName(nests, nestQuery),
+    [nests, nestQuery],
+  );
+
+  const nestChoices = useMemo(() => {
+    if (!isFilterActive(nestQuery) || !selected) return visibleNests;
+    return [
+      selected,
+      ...visibleNests.filter((nest) => nest.id !== selected.id),
+    ];
+  }, [visibleNests, selected, nestQuery]);
+
+  const doneIds = useMemo(() => {
+    const ids = new Set<number>();
+    for (const run of runs) {
+      if (run.nestId === selectedId) ids.add(run.characterId);
+    }
+    return ids;
+  }, [runs, selectedId]);
+
+  const visibleCharacters = useMemo(
+    () => filterByName(characters, characterQuery),
+    [characters, characterQuery],
+  );
 
   if (loading && !state) return <LoadingState />;
   if (!state) return null;
@@ -38,21 +85,40 @@ export function RunPage({
     );
   }
 
-  const selected =
-    state.nests.find((nest) => nest.id === selectedNestId) ?? state.nests[0];
   if (!selected) return null;
 
-  const doneIds = new Set(
-    state.runs
-      .filter((run) => run.nestId === selected.id)
-      .map((run) => run.characterId),
+  const doneCount = characters.reduce(
+    (count, character) => (doneIds.has(character.id) ? count + 1 : count),
+    0,
   );
-  const notYet = state.characters.filter(
+  const notYet = visibleCharacters.filter(
     (character) => !doneIds.has(character.id),
   );
-  const doneCharacters = state.characters.filter((character) =>
+  const doneCharacters = visibleCharacters.filter((character) =>
     doneIds.has(character.id),
   );
+
+  const characterFilterActive = isFilterActive(characterQuery);
+  const nestFilterActive = isFilterActive(nestQuery);
+  const noCharacterMatches =
+    characterFilterActive && visibleCharacters.length === 0;
+
+  const filterMessages: string[] = [];
+  if (characterFilterActive) {
+    filterMessages.push(
+      `Showing ${visibleCharacters.length} of ${characters.length} characters`,
+    );
+  }
+  if (nestFilterActive) {
+    filterMessages.push(
+      `Showing ${visibleNests.length} of ${nests.length} nests`,
+    );
+  }
+
+  const clearFilters = () => {
+    setCharacterQuery('');
+    setNestQuery('');
+  };
 
   return (
     <div className="flex flex-col gap-5">
@@ -68,84 +134,123 @@ export function RunPage({
             Done
           </span>{' '}
           <span className="text-lg font-bold tabular-nums">
-            {doneCharacters.length} / {state.characters.length}
+            {doneCount} / {characters.length}
           </span>
         </div>
       </div>
 
-      <div
-        className="flex flex-wrap gap-2"
-        role="group"
-        aria-label="Choose a nest"
-      >
-        {state.nests.map((nest) => (
-          <button
-            key={nest.id}
-            type="button"
-            onClick={() => setSelectedNestId(nest.id)}
-            aria-pressed={nest.id === selected.id}
-            className={`chip ${
-              nest.id === selected.id ? 'chip-active' : 'chip-inactive'
-            }`}
-          >
-            {nest.name}
-          </button>
-        ))}
+      <section className="card p-4">
+        <SearchField
+          value={nestQuery}
+          onChange={setNestQuery}
+          placeholder="Search nests"
+          label="Search nests"
+        />
+        <div
+          className="mt-3 flex flex-wrap gap-2"
+          role="group"
+          aria-label="Choose a nest"
+        >
+          {nestChoices.map((nest) => (
+            <button
+              key={nest.id}
+              type="button"
+              onClick={() => setSelectedNestId(nest.id)}
+              aria-pressed={nest.id === selected.id}
+              className={`chip ${
+                nest.id === selected.id ? 'chip-active' : 'chip-inactive'
+              }`}
+            >
+              {nest.name}
+            </button>
+          ))}
+        </div>
+        {nestFilterActive && visibleNests.length === 0 && (
+          <p className="muted mt-3">
+            No other nests match “{nestQuery.trim()}”.
+          </p>
+        )}
+      </section>
+
+      <div className="flex flex-col gap-2">
+        <SearchField
+          value={characterQuery}
+          onChange={setCharacterQuery}
+          placeholder="Search characters"
+          label="Search characters"
+          className="sm:max-w-sm"
+        />
+        <FilterStatus messages={filterMessages} onClear={clearFilters} />
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <section className="card p-4">
-          <header className="flex items-center justify-between gap-3 px-1">
-            <h2 className="section-title">Not yet</h2>
-            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold tabular-nums text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-              {notYet.length}
-            </span>
-          </header>
-          <div className="mt-3 space-y-2">
-            {notYet.length === 0 ? (
-              <p className="muted rounded-xl border border-dashed border-slate-300 px-4 py-6 text-center dark:border-slate-700">
-                Everyone has run {selected.name} this week.
-              </p>
-            ) : (
-              notYet.map((character) => (
-                <CharacterToggleCard
-                  key={character.id}
-                  name={character.name}
-                  done={false}
-                  pending={pendingRuns.has(`${character.id}:${selected.id}`)}
-                  onToggle={() => void setRun(character.id, selected.id, true)}
-                />
-              ))
-            )}
-          </div>
-        </section>
+      {noCharacterMatches ? (
+        <NoMatchState
+          message={`No characters match “${characterQuery.trim()}”.`}
+          onAction={clearFilters}
+        />
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2">
+          <section className="card p-4">
+            <header className="flex items-center justify-between gap-3 px-1">
+              <h2 className="section-title">Not yet</h2>
+              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold tabular-nums text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                {notYet.length}
+              </span>
+            </header>
+            <div className="mt-3 space-y-2">
+              {notYet.length === 0 ? (
+                <p className="muted rounded-xl border border-dashed border-slate-300 px-4 py-6 text-center dark:border-slate-700">
+                  {characterFilterActive
+                    ? 'No matching characters are not yet done.'
+                    : `Everyone has run ${selected.name} this week.`}
+                </p>
+              ) : (
+                notYet.map((character) => (
+                  <CharacterToggleCard
+                    key={character.id}
+                    name={character.name}
+                    done={false}
+                    pending={pendingRuns.has(`${character.id}:${selected.id}`)}
+                    onToggle={() =>
+                      void setRun(character.id, selected.id, true)
+                    }
+                  />
+                ))
+              )}
+            </div>
+          </section>
 
-        <section className="card p-4">
-          <header className="flex items-center justify-between gap-3 px-1">
-            <h2 className="section-title">Done</h2>
-            <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold tabular-nums text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
-              {doneCharacters.length}
-            </span>
-          </header>
-          <div className="mt-3 space-y-2">
-            {doneCharacters.length === 0 ? (
-              <p className="muted rounded-xl border border-dashed border-slate-300 px-4 py-6 text-center dark:border-slate-700">
-                No one has completed {selected.name} yet this week.
-              </p>
-            ) : (
-              doneCharacters.map((character) => (
-                <CharacterToggleCard
-                  key={character.id}
-                  name={character.name}
-                  done
-                  pending={pendingRuns.has(`${character.id}:${selected.id}`)}
-                  onToggle={() => void setRun(character.id, selected.id, false)}
-                />
-              ))
-            )}
-          </div>
-        </section>
-      </div>
+          <section className="card p-4">
+            <header className="flex items-center justify-between gap-3 px-1">
+              <h2 className="section-title">Done</h2>
+              <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold tabular-nums text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                {doneCharacters.length}
+              </span>
+            </header>
+            <div className="mt-3 space-y-2">
+              {doneCharacters.length === 0 ? (
+                <p className="muted rounded-xl border border-dashed border-slate-300 px-4 py-6 text-center dark:border-slate-700">
+                  {characterFilterActive
+                    ? `No matching characters have run ${selected.name} yet.`
+                    : `No one has completed ${selected.name} yet this week.`}
+                </p>
+              ) : (
+                doneCharacters.map((character) => (
+                  <CharacterToggleCard
+                    key={character.id}
+                    name={character.name}
+                    done
+                    pending={pendingRuns.has(`${character.id}:${selected.id}`)}
+                    onToggle={() =>
+                      void setRun(character.id, selected.id, false)
+                    }
+                  />
+                ))
+              )}
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }

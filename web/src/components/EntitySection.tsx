@@ -1,16 +1,26 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { errorMessage } from '../api/client';
+import { analyzeAddName } from '../lib/names';
+import { filterByName, isFilterActive } from '../lib/search';
 import { ConfirmDialog } from './ConfirmDialog';
+import { FilterStatus } from './FilterStatus';
+import { NoMatchState } from './NoMatchState';
+import { SearchField } from './SearchField';
 
 export interface Entity {
   id: number;
   name: string;
 }
 
+function pluralized(label: string, count: number): string {
+  return count === 1 ? label : `${label}s`;
+}
+
 export function EntitySection({
   title,
   description,
+  itemLabel,
   items,
   placeholder,
   addLabel,
@@ -22,6 +32,7 @@ export function EntitySection({
 }: {
   title: string;
   description: string;
+  itemLabel: string;
   items: Entity[];
   placeholder: string;
   addLabel: string;
@@ -44,11 +55,29 @@ export function EntitySection({
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const searchActive = isFilterActive(searchQuery);
+  const visibleItems = filterByName(items, searchQuery);
+  const itemPlural = `${itemLabel}s`;
+  const itemLabelForCount = pluralized(itemLabel, items.length);
+  const addAnalysis = analyzeAddName(items, newName);
+  const visibleMatches = addAnalysis.matches.slice(0, 5);
+  const hiddenMatches = addAnalysis.matches.length - visibleMatches.length;
+
   const submitAdd = async (event: FormEvent) => {
     event.preventDefault();
     const name = newName.trim();
     if (!name) {
       setAddError('Name must not be empty.');
+      return;
+    }
+
+    const duplicate = analyzeAddName(items, name).exactMatch;
+    if (duplicate) {
+      setAddError(
+        `“${duplicate.name}” already exists. Names are unique (case-insensitive).`,
+      );
       return;
     }
 
@@ -125,19 +154,40 @@ export function EntitySection({
         <input
           className="input"
           value={newName}
-          onChange={(event) => setNewName(event.target.value)}
+          onChange={(event) => {
+            setNewName(event.target.value);
+            if (addError) setAddError(null);
+          }}
           placeholder={placeholder}
           maxLength={50}
-          aria-label={`New ${title.toLowerCase()} name`}
+          aria-label={`New ${itemLabel} name`}
         />
         <button
           type="submit"
           className="btn btn-primary shrink-0"
-          disabled={addBusy}
+          disabled={addBusy || addAnalysis.exactMatch !== undefined}
         >
           {addBusy ? 'Adding…' : addLabel}
         </button>
       </form>
+
+      {addAnalysis.exactMatch ? (
+        <p
+          className="mt-2 text-sm font-medium text-amber-700 dark:text-amber-300"
+          role="status"
+          aria-live="polite"
+        >
+          “{addAnalysis.exactMatch.name}” already exists. Names are unique
+          (case-insensitive).
+        </p>
+      ) : addAnalysis.matches.length > 0 ? (
+        <p className="muted mt-2" role="status" aria-live="polite">
+          Existing matches:{' '}
+          {visibleMatches.map((item) => item.name).join(', ')}
+          {hiddenMatches > 0 ? ` +${hiddenMatches} more` : ''}
+        </p>
+      ) : null}
+
       {addError && (
         <p className="mt-2 text-sm text-rose-600 dark:text-rose-400" role="alert">
           {addError}
@@ -156,75 +206,106 @@ export function EntitySection({
             {emptyText}
           </p>
         ) : (
-          <ul className="divide-y divide-slate-200 dark:divide-slate-800">
-            {items.map((item) => (
-              <li key={item.id} className="py-2">
-                {editingId === item.id ? (
-                  <form
-                    onSubmit={submitEdit}
-                    className="flex flex-col gap-2 sm:flex-row sm:items-center"
-                  >
-                    <input
-                      className="input"
-                      value={editName}
-                      onChange={(event) => setEditName(event.target.value)}
-                      maxLength={50}
-                      aria-label={`Rename ${item.name}`}
-                      autoFocus
-                    />
-                    <div className="flex gap-2">
-                      <button
-                        type="submit"
-                        className="btn btn-primary shrink-0"
-                        disabled={editBusy}
-                      >
-                        {editBusy ? 'Saving…' : 'Save'}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-secondary shrink-0"
-                        onClick={cancelEditing}
-                        disabled={editBusy}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                    {editError && (
-                      <p
-                        className="text-sm text-rose-600 dark:text-rose-400 sm:w-full"
-                        role="alert"
-                      >
-                        {editError}
-                      </p>
-                    )}
-                  </form>
-                ) : (
-                  <div className="flex min-h-12 items-center gap-2">
-                    <span className="min-w-0 flex-1 truncate font-medium">
-                      {item.name}
-                    </span>
-                    <button
-                      type="button"
-                      className="btn btn-ghost min-h-10 px-3"
-                      onClick={() => startEditing(item)}
-                    >
-                      Rename
-                    </button>
-                    <button
-                      type="button"
-                      className="btn min-h-10 px-3 text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40"
-                      onClick={() => {
-                        setDeleteError(null);
-                        setDeleteTarget(item);
-                      }}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
+          <>
+            <div className="flex flex-col gap-2">
+              <SearchField
+                value={searchQuery}
+                onChange={setSearchQuery}
+                placeholder={`Search ${itemPlural}`}
+                label={`Search ${itemPlural}`}
+              />
+              <FilterStatus
+                messages={
+                  searchActive
+                    ? [
+                        `Showing ${visibleItems.length} of ${items.length} ${itemLabelForCount}`,
+                      ]
+                    : []
+                }
+                onClear={() => setSearchQuery('')}
+              />
+            </div>
+
+            <div className="mt-3">
+              {searchActive && visibleItems.length === 0 ? (
+                <NoMatchState
+                  message={`No ${itemPlural} match “${searchQuery.trim()}”.`}
+                  actionLabel="Clear search"
+                  onAction={() => setSearchQuery('')}
+                />
+              ) : (
+                <ul className="divide-y divide-slate-200 dark:divide-slate-800">
+                  {visibleItems.map((item) => (
+                    <li key={item.id} className="py-2">
+                      {editingId === item.id ? (
+                        <form
+                          onSubmit={submitEdit}
+                          className="flex flex-col gap-2 sm:flex-row sm:items-center"
+                        >
+                          <input
+                            className="input"
+                            value={editName}
+                            onChange={(event) => setEditName(event.target.value)}
+                            maxLength={50}
+                            aria-label={`Rename ${item.name}`}
+                            autoFocus
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              type="submit"
+                              className="btn btn-primary shrink-0"
+                              disabled={editBusy}
+                            >
+                              {editBusy ? 'Saving…' : 'Save'}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-secondary shrink-0"
+                              onClick={cancelEditing}
+                              disabled={editBusy}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                          {editError && (
+                            <p
+                              className="text-sm text-rose-600 dark:text-rose-400 sm:w-full"
+                              role="alert"
+                            >
+                              {editError}
+                            </p>
+                          )}
+                        </form>
+                      ) : (
+                        <div className="flex min-h-12 items-center gap-2">
+                          <span className="min-w-0 flex-1 truncate font-medium">
+                            {item.name}
+                          </span>
+                          <button
+                            type="button"
+                            className="btn btn-ghost min-h-10 px-3"
+                            onClick={() => startEditing(item)}
+                          >
+                            Rename
+                          </button>
+                          <button
+                            type="button"
+                            className="btn min-h-10 px-3 text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40"
+                            onClick={() => {
+                              setDeleteError(null);
+                              setDeleteTarget(item);
+                            }}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </>
         )}
       </div>
 

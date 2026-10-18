@@ -5,6 +5,7 @@
   "description": "Local Dragon Nest weekly nest run tracker",
   "scripts": {
     "dev": "tsx watch server/src/dev.mts",
+    "seed:dev": "tsx server/src/seed-dev.ts",
     "build": "tsc -p server/tsconfig.json && tsc -p server/tsconfig.dev.json && tsc -p web/tsconfig.json --noEmit && vite build",
     "start": "node dist/server/index.js",
     "test": "vitest run",

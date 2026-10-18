@@ -23,6 +23,7 @@ export function ManagePage() {
         <EntitySection
           title="Characters"
           description="Add each character you play."
+          itemLabel="character"
           items={state.characters}
           placeholder="e.g. Raven"
           addLabel="Add character"
@@ -47,6 +48,7 @@ export function ManagePage() {
         <EntitySection
           title="Nests"
           description="Add the nests you run each week."
+          itemLabel="nest"
           items={state.nests}
           placeholder="e.g. Abyss"
           addLabel="Add nest"

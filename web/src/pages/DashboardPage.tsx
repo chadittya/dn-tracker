@@ -1,5 +1,7 @@
 import type { Tab } from '../lib/navigation';
+import { buildDashboardLists } from '../lib/dashboard';
 import { useAppState } from '../state/context';
+import { DashboardListSection } from '../components/DashboardListSection';
 import { EmptyState } from '../components/EmptyState';
 import { LoadingState } from '../components/LoadingState';
 import { ProgressBar } from '../components/ProgressBar';
@@ -28,6 +30,7 @@ export function DashboardPage({
   }
 
   const { dashboard } = state;
+  const lists = buildDashboardLists(dashboard);
   const percent =
     dashboard.total > 0
       ? Math.round((dashboard.done / dashboard.total) * 100)
@@ -61,66 +64,66 @@ export function DashboardPage({
         <ResetCountdown />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <section className="card p-5">
-          <h2 className="section-title">Progress per nest</h2>
-          <div className="mt-4 space-y-4">
-            {dashboard.perNest.map((nest) => (
-              <ProgressBar
-                key={nest.nestId}
-                label={nest.name}
-                done={nest.done}
-                total={nest.total}
-              />
-            ))}
-          </div>
+      {lists.allDone ? (
+        <section className="card flex flex-col items-center justify-center gap-2 px-6 py-10 text-center">
+          <p className="text-lg font-semibold">All done this week</p>
+          <p className="muted">
+            Every character has run every nest. Come back after the next reset.
+          </p>
         </section>
-
-        <section className="card p-5">
-          <h2 className="section-title">Progress per character</h2>
-          <div className="mt-4 space-y-4">
-            {dashboard.perCharacter.map((character) => (
+      ) : (
+        <div className="grid items-start gap-4 lg:grid-cols-2">
+          <DashboardListSection
+            title="Most remaining"
+            description="Characters ranked by how many nests they still need this week."
+            actionLabel="View all"
+            onAction={() => onNavigate('matrix')}
+            isEmpty={lists.topCharacters.length === 0}
+            emptyMessage="No characters have remaining runs."
+            moreCount={lists.moreCharacters}
+            moreLabel="characters"
+          >
+            {lists.topCharacters.map((character) => (
               <ProgressBar
                 key={character.characterId}
                 label={character.name}
                 done={character.done}
                 total={character.total}
+                trailing={
+                  <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold tabular-nums text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                    {character.remaining} left
+                  </span>
+                }
               />
             ))}
-          </div>
-        </section>
-      </div>
+          </DashboardListSection>
 
-      <section className="card p-5">
-        <h2 className="section-title">Most remaining runs</h2>
-        <p className="muted mt-1">
-          Characters ranked by how many nests they still need this week.
-        </p>
-        <ol className="mt-4 divide-y divide-slate-200 dark:divide-slate-800">
-          {dashboard.mostRemaining.map((character, index) => (
-            <li
-              key={character.characterId}
-              className="flex min-h-12 items-center gap-3 py-2"
-            >
-              <span className="w-6 text-sm font-semibold tabular-nums text-slate-400 dark:text-slate-500">
-                {index + 1}.
-              </span>
-              <span className="min-w-0 flex-1 truncate font-medium">
-                {character.name}
-              </span>
-              <span
-                className={`rounded-full px-2.5 py-1 text-xs font-semibold tabular-nums ${
-                  character.remaining === 0
-                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
-                    : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200'
-                }`}
-              >
-                {character.remaining} left
-              </span>
-            </li>
-          ))}
-        </ol>
-      </section>
+          <DashboardListSection
+            title="Nests needing runs"
+            description="Nests that are not finished yet, ranked by most remaining."
+            actionLabel="View all"
+            onAction={() => onNavigate('runs')}
+            isEmpty={lists.topNests.length === 0}
+            emptyMessage="Every nest is complete."
+            moreCount={lists.moreNests}
+            moreLabel="nests"
+          >
+            {lists.topNests.map((nest) => (
+              <ProgressBar
+                key={nest.nestId}
+                label={nest.name}
+                done={nest.done}
+                total={nest.total}
+                trailing={
+                  <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold tabular-nums text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                    {nest.remaining} left
+                  </span>
+                }
+              />
+            ))}
+          </DashboardListSection>
+        </div>
+      )}
     </div>
   );
 }

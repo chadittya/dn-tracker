@@ -10,6 +10,7 @@ build
 coverage
 *.log
 .claude/settings.local.json
+Project_Context_v1.md
 
 # database and backups: never commit your data
 data/
