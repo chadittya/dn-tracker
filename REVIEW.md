@@ -1,156 +1,193 @@
-# Review — Dragon Nest Run Tracker v2
+# Review — Dragon Nest Run Tracker v3.1 Heraldry
 
 ## 1. Summary
 
-v2 adds client-side search and filtering to Runs, Matrix, and Manage, and
-replaces the Dashboard's three overlapping lists with two capped summaries.
-The iteration is frontend-only: no schema, migration, API endpoint, API
-response, business-rule, or dependency changes.
+v3.1 adds persistent heraldry tracking for every character:
 
-The previous v1 review is preserved in git history.
+- 8 slots per character, each storing a plate, plate level, rarity, and
+  whether the plate has a third stat.
+- Heraldry is independent of the weekly run reset.
+- Status is always computed server-side from level rank, rarity, and third
+  stat. No status is stored in the database.
+- Migration 2 adds `plate_levels`, `plates`, and `character_heraldry`.
+- `GET /api/state` gains an additive `heraldry` block; existing fields are
+  unchanged.
+- New endpoints manage levels, plates, slots, clearing, and copying.
+- Export is now `version: 2`; import accepts version 1 and version 2. A
+  version 1 import clears current heraldry.
+- The frontend gains a Heraldry tab after Matrix, a Dashboard upgrade list,
+  Manage sections for levels/plates, and backup/import copy updates.
+
+No new dependency was added. Week/reset behavior, v1/v2 run tracking, and
+existing API response fields are unchanged.
+
+The v2 review remains in git history.
 
 ## 2. Requirement checklist
 
-### Search behavior (all pages)
+### Data and status rules
 
-- [x] Client-side only, case-insensitive contains match, input trimmed.
-- [x] Empty search shows everything.
-- [x] No matches shows a message such as `No characters match “xyz”.` with a
-      clear action.
-- [x] Active filters show `Showing X of Y …` plus `Clear filters`.
-- [x] One `Clear filters` action clears all filters on the tab, including the
-      Matrix remaining toggle.
-- [x] No week-boundary computation in the frontend.
+- [x] Migration 2 creates `plate_levels`, `plates`, and
+      `character_heraldry`.
+- [x] One plate per slot; one plate use per character enforced by
+      `UNIQUE (character_id, plate_id)`.
+- [x] Slot storage has `CHECK (slot >= 1)`; the upper bound of 8 is enforced
+      by `HERALDRY_SLOT_COUNT` in validation, routes, and import.
+- [x] Character deletes cascade to heraldry; plate deletes empty slots; used
+      levels are protected by `ON DELETE RESTRICT` plus a route pre-check.
+- [x] Level rank: descending position, rank 0 = cap, rank 1 = next lower,
+      rank 2+ = lower.
+- [x] Epic rank 0 = OK; epic rank 1 = OK with third stat, otherwise
+      Recommended; epic rank 2+ = Needs upgrade.
+- [x] Rare rank 0 = Recommended with third stat, otherwise Needs upgrade;
+      rare rank 1/2+ = Needs upgrade.
+- [x] Empty slot = Needs upgrade.
+- [x] Single-level and empty-level-list cases behave as approved.
+- [x] Status, ranks, `perCharacter` counts, and empty-slot expansion live in
+      pure `server/src/heraldry.ts`.
+- [x] The frontend never recomputes ranks or statuses.
 
-### Runs tab
+### API
 
-- [x] Nest selector replaced by a search field over the nest chip list.
-- [x] Character search above the Not yet / Done columns.
-- [x] `Done X / Y` always uses true, unfiltered totals for the selected nest.
-- [x] Column badges show the filtered counts actually displayed.
-- [x] One-click character toggle unchanged while filtered.
-- [x] Selected nest is pinned first only while a nest search is active; with
-      an empty nest search the original nest order is preserved.
-- [x] If the selected nest is filtered out, it stays selected and visible.
+- [x] `GET /api/state` adds `heraldry` with `slotCount`, sorted levels, cap,
+      plates, a full `slotCount` grid for every character, and
+      `perCharacter` summaries.
+- [x] `POST/DELETE /api/heraldry/levels` with duplicate and in-use errors.
+- [x] `POST/PATCH/DELETE /api/heraldry/plates`.
+- [x] `PUT /api/heraldry/slots` with full validation, upsert, and duplicate
+      plate conflict details.
+- [x] `DELETE /api/heraldry/slots/:characterId/:slot` is idempotent.
+- [x] `POST /api/heraldry/copy` replaces all target slots in one transaction
+      and rejects same-character copies.
+- [x] Structured `details` are additive on errors; existing error shape is
+      unchanged.
+- [x] All SQL is parameterized.
 
-### Matrix tab
+### Import/export and backups
 
-- [x] Character search filters rows.
-- [x] Nest search filters columns.
-- [x] `Only characters with remaining runs` hides characters done on every
-      currently visible nest.
-- [x] Zero visible nests is handled before the remaining-toggle/empty logic,
-      so it never reports “all done on the visible nests”.
-- [x] Cell clicks toggle as before while filtered.
-- [x] Sticky header row and first column markup unchanged.
-- [x] Trailing `Done X / Y` counts visible nest columns only (confirmed).
+- [x] Export is `version: 2` and includes `plateLevels`, `plates`, and
+      `characterHeraldry`.
+- [x] Import accepts versions 1 and 2.
+- [x] Version 2 validates the file's own level, plate, and character
+      references before applying anything.
+- [x] Invalid files still change nothing and create no backup.
+- [x] Valid imports create `preimport-*` before replacing data.
+- [x] Version 1 files clear current heraldry.
+- [x] Automatic SQLite backups include the new tables through
+      `db.backup()` without extra code.
+- [x] Import result counts now include plate levels, plates, and heraldry
+      slots.
 
-### Manage tab
+### Frontend
 
-- [x] Search above both the character and nest lists.
-- [x] Add input shows live existing matches while typing.
-- [x] Exact ASCII case-insensitive duplicate shows a warning and disables Add.
-- [x] `submitAdd` re-checks duplicates so implicit Enter submission cannot
-      bypass the disabled button.
-- [x] Partial matches keep Add enabled; the server remains the source of truth.
-- [x] Rename/remove behavior and confirmations unchanged.
+- [x] Heraldry tab appears after Matrix.
+- [x] Grid shows 8 slots per character, sticky header/first column, filled and
+      empty states, third-stat marker, and status badges.
+- [x] Character, plate, and status filters work together; empty slots only
+      match the status filter, never a plate filter.
+- [x] Slot editor supports plate, level, Set to cap, Epic/Rare, third stat,
+      save, clear, and copy with a confirmation using `slotCount`.
+- [x] Plates already used by the same character are disabled in the editor.
+- [x] Manage adds plate-level management and the Plates entity section.
+- [x] Level delete confirmation states the resulting cap and that all
+      statuses are recalculated.
+- [x] Level-in-use errors list the first 5 affected slots and `+N more`.
+- [x] Rank-shift notes appear after adding below the cap and after deleting a
+      level that leaves lower levels.
+- [x] Dashboard shows the heraldry upgrade list outside the all-runs-done
+      branch, sorted needs before recommended, with slot-order plate names,
+      `+N`, and `N empty`.
+- [x] Dashboard row click prefills the Heraldry character search.
+- [x] View all opens Heraldry without a prefill.
+- [x] No-levels and no-plates states are handled.
+- [x] Character/plate delete warnings mention heraldry effects.
+- [x] Backup page copy and success counts mention heraldry and version 1
+      clearing behavior.
 
-### Dashboard
+### Documentation and constraints
 
-- [x] Overall progress, Remaining, Characters, and ResetCountdown stat cards
-      kept.
-- [x] `Most remaining`: only characters with remaining runs, sorted most
-      remaining first, top 10, remaining badge plus progress bar.
-- [x] `View all` for characters goes to Matrix.
-- [x] `Nests needing runs`: only nests not 100% done, sorted most remaining
-      first, top 5.
-- [x] `View all` for nests goes to Runs.
-- [x] `+N more` shown when a list is capped.
-- [x] One global `All done this week` card when every run is done.
-- [x] If only one section is empty, that section shows its own empty message.
-
-### Hard constraints
-
-- [x] No database schema change or new migration.
-- [x] No new API endpoint and no API response changes.
+- [x] `CLAUDE.md` documents heraldry rules, database tables, status rules,
+      `HERALDRY_SLOT_COUNT`, export version 2, and v1/v2 import behavior.
+- [x] `README.md` documents heraldry and import/export behavior.
 - [x] No new dependency.
-- [x] Business rules, week logic, reset, names, and cascade behavior unchanged.
-- [x] Frontend still uses `weekKey` / `nextResetAt` from the API only.
-- [x] Existing 51 server tests still pass.
-- [x] Lint and build pass.
-- [x] API responses remain backward compatible; `mostRemaining` is retained.
+- [x] No SQL string concatenation.
+- [x] Existing 77 tests still pass; new coverage added.
 
-## 3. Files changed / created
+## 3. Key implementation details
+
+### Prefill hashchange guard
+
+`navigate()` records the hash it is about to set in `pendingHashRef`.
+`keepsHeraldryPrefillOnHashChange(pendingHash, currentHash)` returns true only
+when the incoming hashchange matches that pending hash. Back/forward and
+manual hash edits have no matching pending hash, so they clear the one-shot
+prefill. This decision is covered by `web/src/lib/navigation.test.ts`.
+
+### Empty slots
+
+The database stores only filled slots. `buildHeraldryState` expands every
+character to exactly `HERALDRY_SLOT_COUNT` entries, so the API and frontend
+receive a complete grid and the server remains the only status authority.
+
+### Level deletion
+
+The route queries affected character/plate/slot rows before deleting. A used
+level returns `409 LEVEL_IN_USE` with `details.affectedCount` and
+`details.affectedSlots`; the database `ON DELETE RESTRICT` remains a second
+line of defense.
+
+### Import replacement order
+
+The transaction deletes in dependency order:
+
+`character_heraldry -> plates -> plate_levels -> runs -> characters -> nests`
+
+then inserts characters/nests, levels, plates, runs, and heraldry. Validation
+runs before the backup and before the transaction.
+
+## 4. Files
 
 ### Created
 
 | File | Purpose |
 | --- | --- |
-| `web/src/lib/search.ts` | Trim/case-insensitive contains matching, generic name filtering, Matrix row filtering. |
-| `web/src/lib/names.ts` | ASCII-only NOCASE duplicate folding and Add-input analysis. |
-| `web/src/lib/dashboard.ts` | Pure Dashboard filtering, sorting, capping, `+N more`, and `allDone`. |
-| `web/src/lib/search.test.ts` | Search and Matrix filter tests. |
-| `web/src/lib/names.test.ts` | Duplicate-detection tests. |
-| `web/src/lib/dashboard.test.ts` | Dashboard sort/cap/all-done tests. |
-| `web/src/components/SearchField.tsx` | Shared controlled search input with accessible clear button. |
-| `web/src/components/FilterStatus.tsx` | Shared “Showing X of Y …” note and page-level `Clear filters`. |
-| `web/src/components/NoMatchState.tsx` | Shared search no-match card with clear action. |
-| `web/src/components/DashboardListSection.tsx` | Dashboard section shell with `View all`, empty message, and `+N more`. |
-| `server/src/seed-dev.ts` | Dev-only database seeder. |
+| `server/src/heraldry.ts` | Pure slot count, rank, status, and state builders. |
+| `server/src/heraldryData.ts` | DB reads for levels, plates, rows, and state. |
+| `server/src/routes/heraldry.ts` | Levels, plates, slots, clear, and copy API. |
+| `server/tests/heraldry.test.ts` | Full status rule table, ranks, state summaries, single/empty levels. |
+| `server/tests/heraldry-api.test.ts` | API validation, cascade, conflict, clear, copy, and level-in-use tests. |
+| `web/src/lib/heraldry.ts` | Pure grid filters and Dashboard upgrade list. |
+| `web/src/lib/heraldry.test.ts` | Filter, sort, cap, plate-name, and no-mutation tests. |
+| `web/src/lib/navigation.test.ts` | Prefill hashchange decision tests. |
+| `web/src/components/HeraldryStatusBadge.tsx` | Icon + text status badges. |
+| `web/src/components/HeraldryGrid.tsx` | Full slot grid with sticky headers. |
+| `web/src/components/HeraldrySlotEditor.tsx` | Slot editor and copy flow. |
+| `web/src/components/PlateLevelSection.tsx` | Level add/delete UI and rank-shift notes. |
+| `web/src/pages/HeraldryPage.tsx` | Heraldry filters, grid, and editor integration. |
 
 ### Modified
 
 | File | Change |
 | --- | --- |
-| `web/src/pages/RunPage.tsx` | Searchable nest selector, character search, filtered columns, true totals, filter notes. |
-| `web/src/pages/MatrixPage.tsx` | Row/column search, remaining toggle, filtered grid, no-match states. |
-| `web/src/pages/DashboardPage.tsx` | Two capped summary lists, global all-done card, reuse of existing `onNavigate`. |
-| `web/src/components/EntitySection.tsx` | Internal list search, live Add duplicate analysis, filtered list rendering. |
-| `web/src/pages/ManagePage.tsx` | Passes `itemLabel` to both EntitySection instances. |
-| `web/src/components/ProgressBar.tsx` | Optional `trailing` slot for the remaining badge. |
-| `vitest.config.mts` | Adds `web/src/**/*.test.ts` to the test include list. |
-| `package.json` | Adds `npm run seed:dev`. |
+| `server/src/migrations.ts` | Migration 2 and exported migration list. |
+| `server/src/app.ts` | Mounts `/api/heraldry`. |
+| `server/src/errors.ts` | Optional error `details` and FK error helper. |
+| `server/src/validation.ts` | Positive integer, slot bound, rarity, and boolean parsers. |
+| `server/src/routes/state.ts` | Adds the heraldry state block. |
+| `server/src/transfer.ts` | Export v2, import v1/v2, heraldry validation/replacement. |
+| `web/src/api/types.ts` | Heraldry and import result types. |
+| `web/src/api/client.ts` | Heraldry API methods and typed error details. |
+| `web/src/lib/navigation.ts` | Heraldry tab, navigate options, prefill helper. |
+| `web/src/App.tsx` | Heraldry route and hashchange-safe prefill. |
+| `web/src/pages/DashboardPage.tsx` | Heraldry upgrade list and row prefill. |
+| `web/src/pages/ManagePage.tsx` | Level/plate management and delete warnings. |
+| `web/src/pages/BackupPage.tsx` | Heraldry export/import copy and counts. |
+| `web/src/components/ConfirmDialog.tsx` | Optional children for level-in-use details. |
+| `server/tests/import.test.ts` | v2 round-trip, v1 clearing, and invalid heraldry cases. |
+| `server/tests/migrations.test.ts` | v1-to-v2 upgrade and FK behavior. |
+| `CLAUDE.md`, `README.md` | Heraldry rules, tables, and export/import version docs. |
 
-### Not changed
-
-- `server/src/progress.ts`, `server/src/routes/state.ts`, all other server
-  routes, migrations, DB code, and backup code.
-- `web/src/api/types.ts`, `web/src/api/client.ts`, and the state provider.
-- `App.tsx`: tab state and navigation already live there; `DashboardPage`
-  already received the existing `onNavigate` callback, so both `View all`
-  actions reuse it with no new navigation code.
-
-## 4. Design decisions
-
-### Dashboard capping is in the frontend
-
-`GET /api/state` already returns full `perCharacter` and `perNest` arrays.
-Capping server-side would either change those arrays (breaking backward
-compatibility) or require a new field/endpoint, both prohibited. Capping is
-presentation policy, and the pure helpers also expose the exact hidden count
-for `+N more`. Data volume is small for a single-user local app.
-
-`dashboard.mostRemaining` remains in the API and type but is no longer used by
-the Dashboard because it lacks `done`/`total` needed for progress bars.
-
-### Selected nest pinning
-
-While a nest search is active, the selected nest is always rendered first and
-keeps the active style, even if it does not match the query. With an empty
-nest search, the original server order is used. This avoids silently changing
-the selected nest when the user types.
-
-### Matrix empty-column ordering
-
-`visibleNests.length === 0` is checked before the character/remaining-toggle
-empty branch. A unit test covers zero visible nests with `onlyRemaining` on.
-
-### Duplicate detection vs search folding
-
-General search uses JS `toLowerCase()` (broader Unicode behavior). The Manage
-duplicate warning uses ASCII-only folding to mirror SQLite `NOCASE`, so the
-client's Add availability matches the server's actual uniqueness rule. The
-server remains authoritative for races and edge cases.
+`server/src/seed-dev.ts` was intentionally not changed.
 
 ## 5. Test results
 
@@ -160,82 +197,66 @@ Commands run:
 npm test
 npm run lint
 npm run build
-npm run seed:dev
 ```
 
 Results:
 
-- `npm test`: **77 passed** (8 files), including the original 51 server tests
-  and 26 new pure-function tests.
-- `npm run lint`: passed with no warnings/errors.
-- `npm run build`: passed (server typecheck, dev typecheck, web typecheck,
-  Vite production build).
-- `npm run seed:dev`: seeded 40 characters, 15 nests, and 309 random
-  current-week runs into `data-dev/app.db`.
-- Headless Chrome (CDP) smoke pass against the seeded dev server: Runs,
-  Matrix, Manage, and Dashboard rendered; filter notes, no-match states, clear
-  filters, Manage duplicate warning/disabled Add, and Dashboard caps all
-  behaved as expected. The only network 404 was `/favicon.ico` (no favicon
-  asset exists); there were no browser runtime errors.
+- `npm test`: **119 passed** across **12 test files**. The original 77 tests
+  still pass, plus 42 new tests.
+- `npm run lint`: passed with no errors or warnings.
+- `npm run build`: passed server typecheck, dev typecheck, web typecheck, and
+  the Vite production build.
 
-No server/API tests were added because no server/API code changed.
+New coverage includes:
 
-## 6. Seed script
+- Every status-rule row, including single-level and empty-level behavior.
+- Rank changes after inserting a level in the middle.
+- Full-grid expansion, empty-slot counts, and most-urgent summaries.
+- Level add/duplicate/delete/in-use details.
+- Plate add/rename/delete, case-insensitive duplicates, and cascade.
+- Slot validation for unknown references, slots 0/9, invalid rarity, and
+  non-boolean third stat.
+- Upsert and duplicate-plate conflicts.
+- Idempotent clear and copy replacement/empty-source behavior.
+- Character-delete cascade.
+- Migration v1-to-v2 upgrade and FK cascade/restrict behavior.
+- Import v2 round-trip, v1 heraldry clearing, and all specified invalid
+  payloads.
+- Frontend filters, Dashboard sorting/capping/plate names, and prefill
+  hashchange decisions.
 
-`npm run seed:dev` runs `server/src/seed-dev.ts`.
+## 6. Manual acceptance checklist
 
-- Hard-coded to `data-dev/`; ignores `DN_DATA_DIR`.
-- Includes an explicit guard that refuses anything whose directory basename is
-  not `data-dev` and refuses the production `data/` path.
-- Replaces dev data with 40 `Character NN` rows, 15 `Nest NN` rows, and random
-  current-week runs using varied completion ratios (0%, 25%, 50%, 75%, 100%).
-- Uses `getWeekKey(new Date())` from the existing week module.
-- Never touches `data/`, does not create production backups, and is not
-  imported by the running server.
+Automated tests cannot exercise the visual layout or real browser history
+events. The following browser checks remain:
 
-## 7. Manual acceptance checklist
+1. Manage: add levels 30/27/25 and plates; add a level below the cap and
+   confirm the rank-shift note; try deleting a used level and confirm the
+   resulting-cap message plus the first-5/`+N more` list; delete a middle
+   level and confirm the post-delete rank-shift note.
+2. Heraldry: fill slots covering every status; verify badges use icon + text,
+   empty cells, legend, filters, `Showing X of Y`, one Clear filters, editor
+   defaults, disabled used plates, Set to cap, clear, and copy confirmation
+   using 8 slots.
+3. Dashboard: verify sorting, caps, plate names in slot order, `+N`,
+   `N empty`, row-click prefill, and View all without prefill.
+4. Prefill/hashchange browser check:
+   - enter a Heraldry search, switch to Dashboard, click a row, and confirm
+     the character name is prefilled;
+   - press Back then Forward and confirm the prefill clears;
+   - use View all and confirm no prefill.
+   The decision function behind this is covered by unit tests; the browser
+   event wiring still needs this manual pass.
+5. Backup: export v2, import it, import an old v1 file (clears heraldry), and
+   confirm an invalid file changes nothing and creates no backup.
+6. Check dark/light mode and sticky header/first column with a horizontally
+   scrolling grid.
 
-1. Run `npm run seed:dev` then `npm run dev`.
-2. Runs: search nests, confirm the selected nest is pinned only while the
-   search is active, filter characters, confirm `Done X / Y` stays true, toggle
-   a character while filtered.
-3. Matrix: filter rows/columns, enable the remaining toggle, toggle a visible
-   cell, scroll and confirm sticky header/first column in dark and light mode.
-4. Manage: search both lists; type an existing name and confirm the warning and
-   disabled Add; type a partial name and confirm matches appear; rename/remove.
-5. Dashboard: confirm top 10 / top 5 ordering, progress bars, `+N more`,
-   `View all` targets, and the global all-done card.
+## 7. Pending decision and open points
 
-A browser-driven smoke pass was performed against the seeded `data-dev/`
-database: Runs character search and true totals, Runs no-match + clear,
-Matrix row/column filters and zero-nest handling, Manage duplicate
-warning/disabled Add and search note, and Dashboard capped lists all passed.
-The client's full manual visual acceptance still remains.
-
-## 8. Deviations and open questions
-
-- Manage “existing matches” are display-only (not clickable) and capped at 5
-  with `+N more`. The spec only asked to show matches.
-- Filters reset when switching tabs because inactive tabs unmount (existing App
-  behavior). No persistence to URL/localStorage/database was added.
-- No Matrix virtualization. Filtering reduces rendered rows/columns, but very
-  large unfiltered grids may still be heavy; out of scope.
-- `REVIEW.md` was replaced with this v2 report; the v1 report remains in git
-  history.
-
-## 9. How to run
-
-```bash
-npm install
-npm run seed:dev   # optional: dev-only sample data
-npm run dev        # http://localhost:3000, data-dev/
-```
-
-Production local use:
-
-```bash
-npm run build
-npm start          # data/
-```
-
-The seed script is never part of normal startup and cannot target `data/`.
+1. **`seed:dev` heraldry data**: still awaiting the client's yes/no. No seed
+   data for levels, plates, or slots was implemented.
+2. **Browser visual acceptance**: not performed in this environment. API,
+   build, and pure logic are covered by automated tests; the checklist above
+   remains for the client's final visual pass.
+3. No other deviations from the approved plan were introduced.

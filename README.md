@@ -1,8 +1,8 @@
 # Dragon Nest Run Tracker
 
-Local-only web app for tracking which characters have run which nests this week.
-Single user, no login. Runs at <http://localhost:3000> and binds to `127.0.0.1`
-only.
+Local-only web app for tracking which characters have run which nests this week,
+plus each character's persistent heraldry loadout. Single user, no login. Runs
+at <http://localhost:3000> and binds to `127.0.0.1` only.
 
 Weekly reset happens every Saturday 08:00 WIB (UTC+7). The reset is
 non-destructive: past runs stay in the database, and a run counts as done only
@@ -67,7 +67,10 @@ the database lives in `data/`.
   are kept.
 - Timestamps in backup filenames are WIB.
 - The Backup page lists both kinds and can export or import all data as JSON.
-  Importing replaces all current data after confirmation.
+  Importing replaces all current data after confirmation, including plate
+  levels, plates, and heraldry slots.
+- Export files use `version: 2` and include heraldry. Import accepts version 1
+  and version 2; importing an older version 1 file clears current heraldry.
 
 `data/` and `data-dev/` are gitignored. Do not commit or edit these files
 manually.
@@ -94,3 +97,25 @@ For development data, repeat the same steps using `data-dev/` and
 - Adding a character or nest needs no backfill: every character is tracked
   against every nest, and a missing run row means "not done".
 - Deleting a character or nest also deletes its run records.
+
+## Heraldry rules
+
+- Every character has 8 heraldry slots. A filled slot stores a plate, a plate
+  level, rarity (Rare or Epic), and whether it has a third stat.
+- Heraldry persists across weekly resets. It is not part of run progress.
+- Add plate levels and plates on the Manage page. The highest level is the
+  current cap. A character cannot use the same plate in two slots.
+- Status is computed by the server from the level rank (highest level = rank 0,
+  next = rank 1, lower = rank 2+), rarity, and third stat:
+
+  | Rarity | Rank 0 | Rank 1 | Rank 2+ |
+  | --- | --- | --- | --- |
+  | Epic | OK | OK with third stat, otherwise Recommended | Needs upgrade |
+  | Rare | Recommended with third stat, otherwise Needs upgrade | Needs upgrade | Needs upgrade |
+
+- An empty slot counts as Needs upgrade.
+- Deleting a used level is blocked. Deleting an unused level recalculates all
+  statuses. Deleting a plate empties its slots. Deleting a character deletes
+  their heraldry.
+- Copying heraldry replaces all slots on the target character with the source
+  character's slots.

@@ -1,6 +1,7 @@
 import { api } from '../api/client';
 import { EntitySection } from '../components/EntitySection';
 import { LoadingState } from '../components/LoadingState';
+import { PlateLevelSection } from '../components/PlateLevelSection';
 import { useAppState } from '../state/context';
 
 export function ManagePage() {
@@ -15,7 +16,7 @@ export function ManagePage() {
         <h1 className="text-2xl font-bold tracking-tight">Manage</h1>
         <p className="muted mt-1">
           Characters and nests have a name only. Every character is tracked on
-          every nest.
+          every nest. Plate levels and plates are used by the Heraldry tab.
         </p>
       </div>
 
@@ -29,7 +30,7 @@ export function ManagePage() {
           addLabel="Add character"
           emptyText="No characters yet."
           deleteWarning={(name) =>
-            `All recorded runs for ${name} across all weeks will also be deleted. This cannot be undone.`
+            `All recorded runs for ${name} across all weeks and all heraldry slots for ${name} will also be deleted. This cannot be undone.`
           }
           onAdd={async (name) => {
             await api.createCharacter(name);
@@ -66,6 +67,53 @@ export function ManagePage() {
           }}
           onDelete={async (id) => {
             await api.deleteNest(id);
+            await refresh();
+          }}
+        />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <PlateLevelSection
+          levels={state.heraldry.levels}
+          cap={state.heraldry.cap}
+          onAdd={async (value) => {
+            await api.addHeraldryLevel(value);
+            await refresh();
+          }}
+          onDelete={async (value) => {
+            await api.deleteHeraldryLevel(value);
+            await refresh();
+          }}
+        />
+
+        <EntitySection
+          title="Plates"
+          description="Add the heraldry plates you use. A character cannot use the same plate twice."
+          itemLabel="plate"
+          items={state.heraldry.plates}
+          placeholder="e.g. Bear"
+          addLabel="Add plate"
+          emptyText="No plates yet."
+          deleteWarning={(name) => {
+            const count = state.heraldry.slots.filter(
+              (slot) => slot.plateName === name,
+            ).length;
+            return count === 0
+              ? `No heraldry slots use ${name}. This cannot be undone.`
+              : `${name} is used by ${count} heraldry slot${
+                  count === 1 ? '' : 's'
+                }. Those slots will become empty. This cannot be undone.`;
+          }}
+          onAdd={async (name) => {
+            await api.createHeraldryPlate(name);
+            await refresh();
+          }}
+          onRename={async (id, name) => {
+            await api.renameHeraldryPlate(id, name);
+            await refresh();
+          }}
+          onDelete={async (id) => {
+            await api.deleteHeraldryPlate(id);
             await refresh();
           }}
         />

@@ -101,9 +101,11 @@ export function BackupPage() {
       setImportSuccess(
         `Imported ${result.imported.characters} characters, ${
           result.imported.nests
-        } nests, and ${result.imported.runs} runs. Pre-import backup: ${
-          result.backup
-        }.`,
+        } nests, ${result.imported.runs} runs, ${
+          result.imported.plateLevels
+        } plate levels, ${result.imported.plates} plates, and ${
+          result.imported.heraldrySlots
+        } heraldry slots. Pre-import backup: ${result.backup}.`,
       );
       await Promise.all([refresh(), loadBackups()]);
     } catch (caught) {
@@ -128,8 +130,8 @@ export function BackupPage() {
         <section className="card p-5">
           <h2 className="section-title">Export data</h2>
           <p className="muted mt-1">
-            Download every character, nest, and run from all weeks as a JSON
-            file.
+            Download every character, nest, run, plate level, plate, and
+            heraldry slot from all weeks as a JSON file.
           </p>
           <button
             type="button"
@@ -149,8 +151,10 @@ export function BackupPage() {
         <section className="card p-5">
           <h2 className="section-title">Import data</h2>
           <p className="muted mt-1">
-            Replaces all current characters, nests, and runs. The file is fully
-            validated first, and a pre-import backup is created.
+            Replaces all current characters, nests, runs, plate levels, plates,
+            and heraldry slots. The file is fully validated first, and a
+            pre-import backup is created. Old files without heraldry data will
+            clear current heraldry.
           </p>
           <input
             ref={fileInputRef}
@@ -263,7 +267,7 @@ export function BackupPage() {
         title="Replace all data?"
         message={`Importing "${
           pendingImport?.fileName ?? ''
-        }" will delete every current character, nest, and run, then replace them with the file's contents. A pre-import backup is created first.`}
+        }" will delete every current character, nest, run, plate level, plate, and heraldry slot, then replace them with the file's contents. Old files without heraldry data will clear current heraldry. A pre-import backup is created first.`}
         confirmLabel="Import and replace"
         danger
         busy={importing}

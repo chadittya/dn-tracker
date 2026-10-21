@@ -5,7 +5,7 @@ interface Migration {
   up: (db: Database.Database) => void;
 }
 
-const migrations: Migration[] = [
+export const migrations: Migration[] = [
   {
     version: 1,
     up: (db) => {
@@ -32,6 +32,36 @@ const migrations: Migration[] = [
 
         CREATE INDEX idx_runs_week_key ON runs(week_key);
         CREATE INDEX idx_runs_nest_id ON runs(nest_id);
+      `);
+    },
+  },
+  {
+    version: 2,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE plate_levels (
+          value INTEGER NOT NULL UNIQUE CHECK (value > 0)
+        );
+
+        CREATE TABLE plates (
+          id          INTEGER PRIMARY KEY,
+          name        TEXT NOT NULL COLLATE NOCASE UNIQUE,
+          created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+        );
+
+        CREATE TABLE character_heraldry (
+          character_id    INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+          slot            INTEGER NOT NULL CHECK (slot >= 1),
+          plate_id        INTEGER NOT NULL REFERENCES plates(id) ON DELETE CASCADE,
+          level           INTEGER NOT NULL REFERENCES plate_levels(value) ON DELETE RESTRICT,
+          rarity          TEXT NOT NULL CHECK (rarity IN ('rare', 'epic')),
+          has_third_stat  INTEGER NOT NULL DEFAULT 0 CHECK (has_third_stat IN (0, 1)),
+          PRIMARY KEY (character_id, slot),
+          UNIQUE (character_id, plate_id)
+        );
+
+        CREATE INDEX idx_character_heraldry_plate_id ON character_heraldry(plate_id);
+        CREATE INDEX idx_character_heraldry_level ON character_heraldry(level);
       `);
     },
   },

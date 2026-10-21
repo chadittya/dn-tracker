@@ -1,4 +1,6 @@
 import { ApiError } from './errors';
+import { HERALDRY_SLOT_COUNT } from './heraldry';
+import type { HeraldryRarity } from './heraldry';
 
 export const MAX_NAME_LENGTH = 50;
 
@@ -43,6 +45,34 @@ export function parseId(value: unknown, field = 'id'): number {
   }
 
   return parsed;
+}
+
+export function parsePositiveInteger(value: unknown, field = 'value'): number {
+  return parseId(value, field);
+}
+
+export function parseSlot(value: unknown, field = 'slot'): number {
+  const slot = parseId(value, field);
+  if (slot > HERALDRY_SLOT_COUNT) {
+    throw new ApiError(
+      400,
+      'VALIDATION_ERROR',
+      `${field} must be between 1 and ${HERALDRY_SLOT_COUNT}.`,
+    );
+  }
+  return slot;
+}
+
+export function parseRarity(
+  value: unknown,
+  field = 'rarity',
+): HeraldryRarity {
+  if (value === 'rare' || value === 'epic') return value;
+  throw new ApiError(
+    400,
+    'VALIDATION_ERROR',
+    `${field} must be "rare" or "epic".`,
+  );
 }
 
 export function parseBoolean(value: unknown, field: string): boolean {

@@ -3,12 +3,14 @@ import type { NextFunction, Request, Response } from 'express';
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
+  readonly details?: unknown;
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, details?: unknown) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
+    this.details = details;
   }
 }
 
@@ -35,6 +37,15 @@ export function isUniqueConstraintError(error: unknown): boolean {
   );
 }
 
+export function isForeignKeyConstraintError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'SQLITE_CONSTRAINT_FOREIGNKEY'
+  );
+}
+
 export function errorHandler(
   error: unknown,
   _req: Request,
@@ -46,9 +57,15 @@ export function errorHandler(
   }
 
   if (error instanceof ApiError) {
-    res.status(error.status).json({
+    const body: {
+      error: { code: string; message: string; details?: unknown };
+    } = {
       error: { code: error.code, message: error.message },
-    });
+    };
+    if (error.details !== undefined) {
+      body.error.details = error.details;
+    }
+    res.status(error.status).json(body);
     return;
   }
 

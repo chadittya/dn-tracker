@@ -45,6 +45,65 @@ function validPayload() {
   };
 }
 
+function validV2Payload() {
+  return {
+    version: 2,
+    characters: [
+      {
+        id: 10,
+        name: 'Raven',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+    ],
+    nests: [
+      {
+        id: 20,
+        name: 'Abyss',
+        createdAt: '2026-01-02T00:00:00.000Z',
+      },
+    ],
+    runs: [
+      {
+        characterId: 10,
+        nestId: 20,
+        weekKey: '2026-10-17',
+        completedAt: '2026-10-17T05:00:00.000Z',
+      },
+    ],
+    plateLevels: [30, 27],
+    plates: [
+      {
+        id: 30,
+        name: 'Bear',
+        createdAt: '2026-01-03T00:00:00.000Z',
+      },
+      {
+        id: 31,
+        name: 'Wolf',
+        createdAt: '2026-01-04T00:00:00.000Z',
+      },
+    ],
+    characterHeraldry: [
+      {
+        characterId: 10,
+        slot: 1,
+        plateId: 30,
+        level: 30,
+        rarity: 'epic',
+        hasThirdStat: true,
+      },
+      {
+        characterId: 10,
+        slot: 2,
+        plateId: 31,
+        level: 27,
+        rarity: 'epic',
+        hasThirdStat: false,
+      },
+    ],
+  };
+}
+
 describe('import', () => {
   it('replaces all data and creates a pre-import backup', async () => {
     setup();
@@ -72,6 +131,9 @@ describe('import', () => {
       characters: 1,
       nests: 1,
       runs: 1,
+      plateLevels: 0,
+      plates: 0,
+      heraldrySlots: 0,
     });
     expect(response.body.backup).toMatch(/^preimport-\d{8}-\d{6}\.db$/);
 
@@ -102,6 +164,159 @@ describe('import', () => {
     backup.close();
   });
 
+  it('clears heraldry when importing a version 1 file', async () => {
+    setup();
+
+    const characterId = Number(
+      context.db
+        .prepare('INSERT INTO characters (name) VALUES (?)')
+        .run('Existing')
+        .lastInsertRowid,
+    );
+    context.db.prepare('INSERT INTO plate_levels (value) VALUES (30)').run();
+    const plateId = Number(
+      context.db
+        .prepare('INSERT INTO plates (name) VALUES (?)')
+        .run('Bear')
+        .lastInsertRowid,
+    );
+    context.db
+      .prepare(
+        `INSERT INTO character_heraldry
+           (character_id, slot, plate_id, level, rarity, has_third_stat)
+         VALUES (?, 1, ?, 30, 'epic', 1)`,
+      )
+      .run(characterId, plateId);
+
+    const response = await request(context.app)
+      .post('/api/data/import')
+      .send(validPayload())
+      .expect(200);
+
+    expect(response.body.imported).toEqual({
+      characters: 1,
+      nests: 1,
+      runs: 1,
+      plateLevels: 0,
+      plates: 0,
+      heraldrySlots: 0,
+    });
+
+    const state = (await request(context.app).get('/api/state').expect(200))
+      .body;
+    expect(state.heraldry.levels).toEqual([]);
+    expect(state.heraldry.cap).toBeNull();
+    expect(state.heraldry.plates).toEqual([]);
+    expect(state.heraldry.slots).toHaveLength(8);
+    expect(
+      state.heraldry.slots.every(
+        (slot: { characterId: number; isEmpty: boolean }) =>
+          slot.characterId === 10 && slot.isEmpty,
+      ),
+    ).toBe(true);
+  });
+
+  it('round-trips a version 2 export with heraldry', async () => {
+    setup();
+
+    const first = await request(context.app)
+      .post('/api/data/import')
+      .send(validV2Payload())
+      .expect(200);
+
+    expect(first.body.imported).toEqual({
+      characters: 1,
+      nests: 1,
+      runs: 1,
+      plateLevels: 2,
+      plates: 2,
+      heraldrySlots: 2,
+    });
+
+    const exported = (
+      await request(context.app).get('/api/data/export').expect(200)
+    ).body;
+    expect(exported).toMatchObject({
+      version: 2,
+      plateLevels: [30, 27],
+      plates: [
+        { id: 30, name: 'Bear' },
+        { id: 31, name: 'Wolf' },
+      ],
+      characterHeraldry: [
+        {
+          characterId: 10,
+          slot: 1,
+          plateId: 30,
+          level: 30,
+          rarity: 'epic',
+          hasThirdStat: true,
+        },
+        {
+          characterId: 10,
+          slot: 2,
+          plateId: 31,
+          level: 27,
+          rarity: 'epic',
+          hasThirdStat: false,
+        },
+      ],
+    });
+
+    const second = await request(context.app)
+      .post('/api/data/import')
+      .send(exported)
+      .expect(200);
+    expect(second.body.imported).toEqual(first.body.imported);
+
+    const state = (await request(context.app).get('/api/state').expect(200))
+      .body;
+    expect(state.heraldry.levels).toEqual([30, 27]);
+    expect(state.heraldry.cap).toBe(30);
+    expect(state.heraldry.plates.map((plate: { name: string }) => plate.name))
+      .toEqual(['Bear', 'Wolf']);
+
+    const filled = state.heraldry.slots.filter(
+      (slot: { isEmpty: boolean }) => !slot.isEmpty,
+    );
+    expect(
+      filled.map(
+        (slot: {
+          slot: number;
+          plateName: string;
+          level: number;
+          rarity: string;
+          hasThirdStat: boolean;
+          status: string;
+        }) => ({
+          slot: slot.slot,
+          plateName: slot.plateName,
+          level: slot.level,
+          rarity: slot.rarity,
+          hasThirdStat: slot.hasThirdStat,
+          status: slot.status,
+        }),
+      ),
+    ).toEqual([
+      {
+        slot: 1,
+        plateName: 'Bear',
+        level: 30,
+        rarity: 'epic',
+        hasThirdStat: true,
+        status: 'ok',
+      },
+      {
+        slot: 2,
+        plateName: 'Wolf',
+        level: 27,
+        rarity: 'epic',
+        hasThirdStat: false,
+        status: 'recommended',
+      },
+    ]);
+  });
+
   it('rejects invalid payloads without changing the database or creating a backup', async () => {
     setup();
 
@@ -113,7 +328,7 @@ describe('import', () => {
     const before = await fetchState(context.app);
 
     const cases: Array<{ label: string; payload: unknown }> = [
-      { label: 'bad version', payload: { ...validPayload(), version: 2 } },
+      { label: 'bad version', payload: { ...validPayload(), version: 3 } },
       {
         label: 'characters not array',
         payload: { ...validPayload(), characters: {} },
@@ -208,6 +423,182 @@ describe('import', () => {
       {
         label: 'runs not array',
         payload: { ...validPayload(), runs: 'nope' },
+      },
+      {
+        label: 'v2 slot level not in file levels',
+        payload: {
+          ...validV2Payload(),
+          characterHeraldry: [
+            {
+              characterId: 10,
+              slot: 1,
+              plateId: 30,
+              level: 25,
+              rarity: 'epic',
+              hasThirdStat: true,
+            },
+          ],
+        },
+      },
+      {
+        label: 'v2 duplicate plate for one character',
+        payload: {
+          ...validV2Payload(),
+          characterHeraldry: [
+            {
+              characterId: 10,
+              slot: 1,
+              plateId: 30,
+              level: 30,
+              rarity: 'epic',
+              hasThirdStat: true,
+            },
+            {
+              characterId: 10,
+              slot: 2,
+              plateId: 30,
+              level: 27,
+              rarity: 'epic',
+              hasThirdStat: false,
+            },
+          ],
+        },
+      },
+      {
+        label: 'v2 invalid rarity',
+        payload: {
+          ...validV2Payload(),
+          characterHeraldry: [
+            {
+              characterId: 10,
+              slot: 1,
+              plateId: 30,
+              level: 30,
+              rarity: 'legendary',
+              hasThirdStat: true,
+            },
+          ],
+        },
+      },
+      {
+        label: 'v2 slot 0',
+        payload: {
+          ...validV2Payload(),
+          characterHeraldry: [
+            {
+              characterId: 10,
+              slot: 0,
+              plateId: 30,
+              level: 30,
+              rarity: 'epic',
+              hasThirdStat: true,
+            },
+          ],
+        },
+      },
+      {
+        label: 'v2 slot 9',
+        payload: {
+          ...validV2Payload(),
+          characterHeraldry: [
+            {
+              characterId: 10,
+              slot: 9,
+              plateId: 30,
+              level: 30,
+              rarity: 'epic',
+              hasThirdStat: true,
+            },
+          ],
+        },
+      },
+      {
+        label: 'v2 duplicate character slot',
+        payload: {
+          ...validV2Payload(),
+          characterHeraldry: [
+            {
+              characterId: 10,
+              slot: 1,
+              plateId: 30,
+              level: 30,
+              rarity: 'epic',
+              hasThirdStat: true,
+            },
+            {
+              characterId: 10,
+              slot: 1,
+              plateId: 31,
+              level: 27,
+              rarity: 'epic',
+              hasThirdStat: false,
+            },
+          ],
+        },
+      },
+      {
+        label: 'v2 unknown character reference',
+        payload: {
+          ...validV2Payload(),
+          characterHeraldry: [
+            {
+              characterId: 999,
+              slot: 1,
+              plateId: 30,
+              level: 30,
+              rarity: 'epic',
+              hasThirdStat: true,
+            },
+          ],
+        },
+      },
+      {
+        label: 'v2 unknown plate reference',
+        payload: {
+          ...validV2Payload(),
+          characterHeraldry: [
+            {
+              characterId: 10,
+              slot: 1,
+              plateId: 999,
+              level: 30,
+              rarity: 'epic',
+              hasThirdStat: true,
+            },
+          ],
+        },
+      },
+      {
+        label: 'v2 non-boolean third stat',
+        payload: {
+          ...validV2Payload(),
+          characterHeraldry: [
+            {
+              characterId: 10,
+              slot: 1,
+              plateId: 30,
+              level: 30,
+              rarity: 'epic',
+              hasThirdStat: 'yes',
+            },
+          ],
+        },
+      },
+      {
+        label: 'v2 duplicate levels',
+        payload: { ...validV2Payload(), plateLevels: [30, 30] },
+      },
+      {
+        label: 'v2 missing plateLevels',
+        payload: { ...validV2Payload(), plateLevels: undefined },
+      },
+      {
+        label: 'v2 missing plates',
+        payload: { ...validV2Payload(), plates: undefined },
+      },
+      {
+        label: 'v2 missing characterHeraldry',
+        payload: { ...validV2Payload(), characterHeraldry: undefined },
       },
     ];
 

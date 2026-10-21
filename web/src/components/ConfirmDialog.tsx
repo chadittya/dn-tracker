@@ -1,9 +1,11 @@
 import { useEffect } from 'react';
+import type { ReactNode } from 'react';
 
 export function ConfirmDialog({
   open,
   title,
   message,
+  children,
   confirmLabel = 'Confirm',
   danger = false,
   busy = false,
@@ -13,6 +15,7 @@ export function ConfirmDialog({
   open: boolean;
   title: string;
   message: string;
+  children?: ReactNode;
   confirmLabel?: string;
   danger?: boolean;
   busy?: boolean;
@@ -52,6 +55,7 @@ export function ConfirmDialog({
         <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
           {message}
         </p>
+        {children ? <div className="mt-3">{children}</div> : null}
         <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button
             type="button"

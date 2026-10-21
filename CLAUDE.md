@@ -1,7 +1,8 @@
 # Dragon Nest Run Tracker
 
-Local-only web app to track which characters have run which nests this week.
-Single user, runs on one PC at http://localhost:3000. No login.
+Local-only web app to track which characters have run which nests this week,
+plus each character's persistent 8-slot heraldry loadout. Single user, runs on
+one PC at http://localhost:3000. No login.
 
 ## Stack
 
@@ -41,12 +42,52 @@ Single user, runs on one PC at http://localhost:3000. No login.
 - Names are trimmed, maximum 50 characters, and duplicates are rejected
   case-insensitively within the same table.
 
+### Heraldry (v3.1)
+
+- Every character has `HERALDRY_SLOT_COUNT = 8` heraldry slots. Each filled
+  slot stores one plate, its plate level, rarity (`rare` or `epic`), and
+  whether it has a third stat.
+- Heraldry is persistent. The weekly reset does not touch it; there is no
+  `week_key` on heraldry rows and no weekly status.
+- Status is computed server-side and never stored:
+  - Level rank = position in the levels sorted descending. Rank 0 is the cap,
+    rank 1 is the next level down, and rank 2+ is anything lower.
+  - Epic: rank 0 = OK; rank 1 = OK with a third stat, otherwise Recommended;
+    rank 2+ = Needs upgrade.
+  - Rare: rank 0 = Recommended with a third stat, otherwise Needs upgrade;
+    rank 1+ = Needs upgrade.
+  - Empty slot = Needs upgrade.
+- With one level, rank 0 is the only rank, so the rare rank-0 rules still
+  apply. With no levels, there is no cap and stored slots are impossible.
+- Plate levels are managed by adding/deleting positive integers. The highest
+  level is the cap. Deleting a level in use is blocked; deleting an unused
+  level recalculates every status. There is no level rename.
+- A character cannot use the same plate in two slots. Plate names use the same
+  trim, maximum length, and case-insensitive uniqueness rules as characters and
+  nests. Deleting a plate empties its slots. Deleting a character cascades to
+  all of its heraldry.
+- Copying heraldry replaces every slot on the target character; copying from an
+  empty source leaves the target empty. Source and target must differ.
+- Export JSON is `version: 2` and includes `plateLevels`, `plates`, and
+  `characterHeraldry`. Import accepts version 1 and version 2. A version 1
+  file has no heraldry arrays, so importing one clears current heraldry.
+
 ## Database rules
 
-- Tables: characters, nests, runs.
+- Tables: characters, nests, runs, plate_levels, plates, character_heraldry.
 - runs: (character_id, nest_id, week_key, completed_at), PRIMARY KEY
   (character_id, nest_id, week_key). Toggle = insert/delete the row.
-- `PRAGMA foreign_keys = ON` and `ON DELETE CASCADE` on runs foreign keys.
+- plate_levels: `value INTEGER NOT NULL UNIQUE CHECK (value > 0)`; the level
+  value is the natural key.
+- plates: id, name, created_at. character_heraldry:
+  (character_id, slot, plate_id, level, rarity, has_third_stat), PRIMARY KEY
+  (character_id, slot), UNIQUE (character_id, plate_id).
+- character_heraldry has `CHECK (slot >= 1)`; the upper bound
+  `HERALDRY_SLOT_COUNT` is enforced by routes, validation, and import, not by
+  database DDL.
+- `PRAGMA foreign_keys = ON`. Runs, plate references, and character references
+  use `ON DELETE CASCADE`; `character_heraldry.level` uses
+  `ON DELETE RESTRICT`.
 - Names use `COLLATE NOCASE` with a UNIQUE constraint.
 - Schema changes only via ordered migrations tracked with `PRAGMA user_version`.
   Migrations run automatically on server start, inside a transaction.
@@ -66,6 +107,9 @@ Single user, runs on one PC at http://localhost:3000. No login.
 
 - All week/time logic lives in `server/src/week.ts` as pure functions with an
   injectable `now`. Never call `new Date()` elsewhere for week logic.
+- All heraldry status logic lives in `server/src/heraldry.ts` as pure functions.
+  The frontend renders the status returned by the API and never recomputes
+  ranks or statuses.
 - The API returns `weekKey` and `nextResetAt`; the frontend uses these and never
   recomputes week boundaries itself.
 - Server binds to 127.0.0.1 only. Dev serves Vite through the same HTTP server

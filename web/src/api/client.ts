@@ -2,19 +2,36 @@ import type {
   AppState,
   BackupInfo,
   Character,
+  HeraldryAffectedSlot,
+  HeraldryPlate,
+  HeraldryRarity,
+  HeraldrySlot,
   ImportResult,
   Nest,
 } from './types';
 
+export interface ApiErrorDetails {
+  affectedSlots?: HeraldryAffectedSlot[];
+  affectedCount?: number;
+  conflictingSlot?: number;
+}
+
 export class ApiRequestError extends Error {
   readonly code: string;
   readonly status: number;
+  readonly details?: ApiErrorDetails;
 
-  constructor(message: string, code: string, status: number) {
+  constructor(
+    message: string,
+    code: string,
+    status: number,
+    details?: ApiErrorDetails,
+  ) {
     super(message);
     this.name = 'ApiRequestError';
     this.code = code;
     this.status = status;
+    this.details = details;
   }
 }
 
@@ -48,12 +65,17 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   if (!response.ok) {
     const error = (payload as {
-      error?: { code?: string; message?: string };
+      error?: { code?: string; message?: string; details?: unknown };
     } | null)?.error;
+    const details =
+      typeof error?.details === 'object' && error.details !== null
+        ? (error.details as ApiErrorDetails)
+        : undefined;
     throw new ApiRequestError(
       error?.message ?? `Request failed (${response.status}).`,
       error?.code ?? 'REQUEST_FAILED',
       response.status,
+      details,
     );
   }
 
@@ -105,6 +127,54 @@ export const api = {
         body: jsonBody({ characterId, nestId, done }),
       },
     ),
+
+  addHeraldryLevel: (value: number) =>
+    request<{ level: { value: number } }>('/api/heraldry/levels', {
+      method: 'POST',
+      body: jsonBody({ value }),
+    }),
+
+  deleteHeraldryLevel: (value: number) =>
+    request<void>(`/api/heraldry/levels/${value}`, { method: 'DELETE' }),
+
+  createHeraldryPlate: (name: string) =>
+    request<{ plate: HeraldryPlate }>('/api/heraldry/plates', {
+      method: 'POST',
+      body: jsonBody({ name }),
+    }),
+
+  renameHeraldryPlate: (id: number, name: string) =>
+    request<{ plate: HeraldryPlate }>(`/api/heraldry/plates/${id}`, {
+      method: 'PATCH',
+      body: jsonBody({ name }),
+    }),
+
+  deleteHeraldryPlate: (id: number) =>
+    request<void>(`/api/heraldry/plates/${id}`, { method: 'DELETE' }),
+
+  setHeraldrySlot: (input: {
+    characterId: number;
+    slot: number;
+    plateId: number;
+    level: number;
+    rarity: HeraldryRarity;
+    hasThirdStat: boolean;
+  }) =>
+    request<{ slot: HeraldrySlot }>('/api/heraldry/slots', {
+      method: 'PUT',
+      body: jsonBody(input),
+    }),
+
+  clearHeraldrySlot: (characterId: number, slot: number) =>
+    request<void>(`/api/heraldry/slots/${characterId}/${slot}`, {
+      method: 'DELETE',
+    }),
+
+  copyHeraldry: (sourceCharacterId: number, targetCharacterId: number) =>
+    request<{ copied: number }>('/api/heraldry/copy', {
+      method: 'POST',
+      body: jsonBody({ sourceCharacterId, targetCharacterId }),
+    }),
 
   getBackups: () =>
     request<{ backups: BackupInfo[] }>('/api/backups'),

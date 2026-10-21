@@ -1,8 +1,10 @@
-import type { Tab } from '../lib/navigation';
+import type { Navigate } from '../lib/navigation';
 import { buildDashboardLists } from '../lib/dashboard';
+import { buildHeraldryUpgradeList } from '../lib/heraldry';
 import { useAppState } from '../state/context';
 import { DashboardListSection } from '../components/DashboardListSection';
 import { EmptyState } from '../components/EmptyState';
+import { HeraldryStatusBadge } from '../components/HeraldryStatusBadge';
 import { LoadingState } from '../components/LoadingState';
 import { ProgressBar } from '../components/ProgressBar';
 import { ResetCountdown } from '../components/ResetCountdown';
@@ -11,7 +13,7 @@ import { StatCard } from '../components/StatCard';
 export function DashboardPage({
   onNavigate,
 }: {
-  onNavigate: (tab: Tab) => void;
+  onNavigate: Navigate;
 }) {
   const { state, loading } = useAppState();
 
@@ -31,6 +33,7 @@ export function DashboardPage({
 
   const { dashboard } = state;
   const lists = buildDashboardLists(dashboard);
+  const heraldryList = buildHeraldryUpgradeList(state.heraldry);
   const percent =
     dashboard.total > 0
       ? Math.round((dashboard.done / dashboard.total) * 100)
@@ -123,6 +126,60 @@ export function DashboardPage({
             ))}
           </DashboardListSection>
         </div>
+      )}
+
+      {state.heraldry.levels.length === 0 ? (
+        <section className="card flex flex-col items-center justify-center gap-2 px-6 py-8 text-center">
+          <h2 className="section-title">Heraldry to upgrade</h2>
+          <p className="muted">Set the cap in Manage first.</p>
+          <button
+            type="button"
+            className="btn btn-primary mt-2"
+            onClick={() => onNavigate('manage')}
+          >
+            Go to Manage
+          </button>
+        </section>
+      ) : (
+        <DashboardListSection
+          title="Heraldry to upgrade"
+          description="Characters whose heraldry needs attention, ranked by the most urgent slots."
+          actionLabel="View all"
+          onAction={() => onNavigate('heraldry')}
+          isEmpty={heraldryList.items.length === 0}
+          emptyMessage="All heraldry slots are up to date."
+          moreCount={heraldryList.more}
+          moreLabel="characters"
+        >
+          {heraldryList.items.map((item) => (
+            <button
+              key={item.characterId}
+              type="button"
+              onClick={() =>
+                onNavigate('heraldry', { characterQuery: item.name })
+              }
+              className="flex min-h-14 w-full flex-col gap-2 rounded-xl border border-slate-200 p-3 text-left transition-colors hover:border-indigo-400 hover:bg-indigo-50/50 dark:border-slate-800 dark:hover:border-indigo-500 dark:hover:bg-indigo-950/20 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <span className="min-w-0">
+                <span className="block truncate font-medium">{item.name}</span>
+                <span className="muted block truncate">
+                  {item.plates.join(', ')}
+                  {item.hiddenPlateCount > 0
+                    ? ` +${item.hiddenPlateCount}`
+                    : ''}
+                  {item.empty > 0
+                    ? `${
+                        item.plates.length > 0 || item.hiddenPlateCount > 0
+                          ? ' · '
+                          : ''
+                      }${item.empty} empty`
+                    : ''}
+                </span>
+              </span>
+              <HeraldryStatusBadge status={item.status} />
+            </button>
+          ))}
+        </DashboardListSection>
       )}
     </div>
   );
