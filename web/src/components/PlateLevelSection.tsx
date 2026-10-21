@@ -1,8 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { ApiRequestError, errorMessage } from '../api/client';
 import type { HeraldryAffectedSlot } from '../api/types';
+import { sortLevelsDesc } from '../lib/ordering';
+import { paginate } from '../lib/pagination';
 import { ConfirmDialog } from './ConfirmDialog';
+import { Pagination } from './Pagination';
 
 export function PlateLevelSection({
   levels,
@@ -28,6 +31,14 @@ export function PlateLevelSection({
   );
   const [affectedCount, setAffectedCount] = useState(0);
 
+  const [page, setPage] = useState(1);
+  const sortedLevels = sortLevelsDesc(levels);
+  const paged = paginate(sortedLevels, page);
+
+  useEffect(() => {
+    if (page !== paged.page) setPage(paged.page);
+  }, [page, paged.page]);
+
   const parsed = Number(newValue);
   const exactDuplicate =
     newValue.trim() !== '' &&
@@ -52,6 +63,7 @@ export function PlateLevelSection({
     try {
       await onAdd(parsed);
       setNewValue('');
+      setPage(1);
       if (previousCap !== null && parsed < previousCap) {
         setRankShiftNote(
           `Level ${parsed} was added below the cap (${previousCap}). Ranks shifted and all slot statuses were recalculated.`,
@@ -198,30 +210,40 @@ export function PlateLevelSection({
             No plate levels yet. Add the current cap to start.
           </p>
         ) : (
-          <ul className="divide-y divide-slate-200 dark:divide-slate-800">
-            {levels.map((value) => (
-              <li
-                key={value}
-                className="flex min-h-12 items-center justify-between gap-2 py-1"
-              >
-                <span className="flex items-center gap-2 font-medium">
-                  Level {value}
-                  {value === cap && (
-                    <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-semibold text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">
-                      Cap
-                    </span>
-                  )}
-                </span>
-                <button
-                  type="button"
-                  className="btn min-h-10 px-3 text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40"
-                  onClick={() => openDelete(value)}
+          <>
+            <ul className="divide-y divide-slate-200 dark:divide-slate-800">
+              {paged.items.map((value) => (
+                <li
+                  key={value}
+                  className="flex min-h-12 items-center justify-between gap-2 py-1"
                 >
-                  Delete
-                </button>
-              </li>
-            ))}
-          </ul>
+                  <span className="flex items-center gap-2 font-medium">
+                    Level {value}
+                    {value === cap && (
+                      <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-semibold text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">
+                        Cap
+                      </span>
+                    )}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn min-h-10 px-3 text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40"
+                    onClick={() => openDelete(value)}
+                  >
+                    Delete
+                  </button>
+                </li>
+              ))}
+            </ul>
+
+            <Pagination
+              summary={paged}
+              itemPlural="levels"
+              label="Plate levels"
+              onPrevious={() => setPage(paged.page - 1)}
+              onNext={() => setPage(paged.page + 1)}
+            />
+          </>
         )}
       </div>
 

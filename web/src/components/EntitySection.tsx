@@ -1,16 +1,24 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { errorMessage } from '../api/client';
 import { analyzeAddName } from '../lib/names';
-import { filterByName, isFilterActive } from '../lib/search';
+import { sortEntitiesForManage } from '../lib/ordering';
+import { paginate } from '../lib/pagination';
+import {
+  filterByName,
+  isFilterActive,
+  matchesName,
+} from '../lib/search';
 import { ConfirmDialog } from './ConfirmDialog';
 import { FilterStatus } from './FilterStatus';
 import { NoMatchState } from './NoMatchState';
+import { Pagination } from './Pagination';
 import { SearchField } from './SearchField';
 
 export interface Entity {
   id: number;
   name: string;
+  createdAt: string;
 }
 
 function pluralized(label: string, count: number): string {
@@ -56,17 +64,32 @@ export function EntitySection({
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const [addStatusNote, setAddStatusNote] = useState<string | null>(null);
 
   const searchActive = isFilterActive(searchQuery);
-  const visibleItems = filterByName(items, searchQuery);
+  const sortedItems = sortEntitiesForManage(items);
+  const filteredItems = filterByName(sortedItems, searchQuery);
+  const paged = paginate(filteredItems, page);
   const itemPlural = `${itemLabel}s`;
   const itemLabelForCount = pluralized(itemLabel, items.length);
   const addAnalysis = analyzeAddName(items, newName);
   const visibleMatches = addAnalysis.matches.slice(0, 5);
   const hiddenMatches = addAnalysis.matches.length - visibleMatches.length;
 
+  useEffect(() => {
+    if (page !== paged.page) setPage(paged.page);
+  }, [page, paged.page]);
+
+  const changeSearch = (value: string) => {
+    setSearchQuery(value);
+    setPage(1);
+    setAddStatusNote(null);
+  };
+
   const submitAdd = async (event: FormEvent) => {
     event.preventDefault();
+    setAddStatusNote(null);
     const name = newName.trim();
     if (!name) {
       setAddError('Name must not be empty.');
@@ -81,11 +104,20 @@ export function EntitySection({
       return;
     }
 
+    const hiddenBySearch =
+      isFilterActive(searchQuery) && !matchesName(name, searchQuery);
+
     setAddBusy(true);
     setAddError(null);
     try {
       await onAdd(name);
       setNewName('');
+      setPage(1);
+      setAddStatusNote(
+        hiddenBySearch
+          ? `Added “${name}”. It does not match the current search, so it is hidden.`
+          : null,
+      );
     } catch (caught) {
       setAddError(errorMessage(caught));
     } finally {
@@ -157,6 +189,7 @@ export function EntitySection({
           onChange={(event) => {
             setNewName(event.target.value);
             if (addError) setAddError(null);
+            if (addStatusNote) setAddStatusNote(null);
           }}
           placeholder={placeholder}
           maxLength={50}
@@ -194,6 +227,12 @@ export function EntitySection({
         </p>
       )}
 
+      {addStatusNote && (
+        <p className="muted mt-2" role="status" aria-live="polite">
+          {addStatusNote}
+        </p>
+      )}
+
       {deleteError && (
         <p className="mt-2 text-sm text-rose-600 dark:text-rose-400" role="alert">
           {deleteError}
@@ -210,7 +249,7 @@ export function EntitySection({
             <div className="flex flex-col gap-2">
               <SearchField
                 value={searchQuery}
-                onChange={setSearchQuery}
+                onChange={changeSearch}
                 placeholder={`Search ${itemPlural}`}
                 label={`Search ${itemPlural}`}
               />
@@ -218,24 +257,24 @@ export function EntitySection({
                 messages={
                   searchActive
                     ? [
-                        `Showing ${visibleItems.length} of ${items.length} ${itemLabelForCount}`,
+                        `Filtered to ${filteredItems.length} of ${items.length} ${itemLabelForCount}`,
                       ]
                     : []
                 }
-                onClear={() => setSearchQuery('')}
+                onClear={() => changeSearch('')}
               />
             </div>
 
             <div className="mt-3">
-              {searchActive && visibleItems.length === 0 ? (
+              {searchActive && filteredItems.length === 0 ? (
                 <NoMatchState
                   message={`No ${itemPlural} match “${searchQuery.trim()}”.`}
                   actionLabel="Clear search"
-                  onAction={() => setSearchQuery('')}
+                  onAction={() => changeSearch('')}
                 />
               ) : (
                 <ul className="divide-y divide-slate-200 dark:divide-slate-800">
-                  {visibleItems.map((item) => (
+                  {paged.items.map((item) => (
                     <li key={item.id} className="py-2">
                       {editingId === item.id ? (
                         <form
@@ -305,6 +344,14 @@ export function EntitySection({
                 </ul>
               )}
             </div>
+
+            <Pagination
+              summary={paged}
+              itemPlural={itemPlural}
+              label={title}
+              onPrevious={() => setPage(paged.page - 1)}
+              onNext={() => setPage(paged.page + 1)}
+            />
           </>
         )}
       </div>

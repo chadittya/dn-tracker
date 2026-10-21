@@ -42,6 +42,15 @@ one PC at http://localhost:3000. No login.
 - Names are trimmed, maximum 50 characters, and duplicates are rejected
   case-insensitively within the same table.
 
+### Manage lists (v3.1.1)
+
+- The four Manage lists (Characters, Nests, Plates, Plate levels) paginate at
+  10 records per page.
+- Characters, Nests, and Plates are ordered newest first by created date, with
+  id descending as the tie-break. Plate levels stay highest value first.
+- This ordering and pagination apply to the Manage lists only. Server response
+  order and the other tabs are unchanged.
+
 ### Heraldry (v3.1)
 
 - Every character has `HERALDRY_SLOT_COUNT = 8` heraldry slots. Each filled
