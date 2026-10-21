@@ -93,12 +93,14 @@ export function PlateLevelSection({
       );
     } catch (caught) {
       if (caught instanceof ApiRequestError && caught.code === 'LEVEL_IN_USE') {
-        setAffectedSlots(caught.details?.affectedSlots ?? []);
+        const slots = caught.details?.affectedSlots ?? [];
+        setAffectedSlots(slots);
         setAffectedCount(
-          caught.details?.affectedCount ??
-            caught.details?.affectedSlots?.length ??
-            0,
+          caught.details?.affectedCount ?? slots.length,
         );
+        // A fallback error may have no joined slot details. Keep the dialog
+        // open and show the server message instead of silently doing nothing.
+        setDeleteError(slots.length === 0 ? caught.message : null);
       } else {
         setDeleteError(errorMessage(caught));
       }

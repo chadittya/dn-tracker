@@ -1,6 +1,11 @@
 import type Database from 'better-sqlite3';
 import { ApiError } from './errors';
 import type { HeraldryRarity } from './heraldry';
+import {
+  readHeraldryRows,
+  readLevels,
+  readPlates,
+} from './heraldryData';
 import { isValidWeekKey } from './week';
 import type { BackupService } from './backup';
 import {
@@ -65,15 +70,6 @@ interface ValidatedImport {
   plateLevels: number[];
   plates: ExportPlate[];
   characterHeraldry: ExportHeraldry[];
-}
-
-interface ExportHeraldryDbRow {
-  characterId: number;
-  slot: number;
-  plateId: number;
-  level: number;
-  rarity: HeraldryRarity;
-  hasThirdStat: number;
 }
 
 function invalid(message: string): never {
@@ -326,19 +322,6 @@ export function validateImportPayload(raw: unknown): ValidatedImport {
 }
 
 export function exportData(db: Database.Database, now: Date): ExportData {
-  const levelRows = db
-    .prepare('SELECT value FROM plate_levels ORDER BY value DESC')
-    .all() as Array<{ value: number }>;
-
-  const heraldryRows = db
-    .prepare(
-      `SELECT character_id AS characterId, slot, plate_id AS plateId,
-              level, rarity, has_third_stat AS hasThirdStat
-         FROM character_heraldry
-        ORDER BY character_id, slot`,
-    )
-    .all() as ExportHeraldryDbRow[];
-
   return {
     version: 2,
     exportedAt: now.toISOString(),
@@ -358,22 +341,9 @@ export function exportData(db: Database.Database, now: Date): ExportData {
           ORDER BY week_key, character_id, nest_id`,
       )
       .all() as ExportRun[],
-    plateLevels: levelRows.map((row) => row.value),
-    plates: db
-      .prepare(
-        `SELECT id, name, created_at AS createdAt
-           FROM plates
-          ORDER BY name COLLATE NOCASE, id`,
-      )
-      .all() as ExportPlate[],
-    characterHeraldry: heraldryRows.map((row) => ({
-      characterId: row.characterId,
-      slot: row.slot,
-      plateId: row.plateId,
-      level: row.level,
-      rarity: row.rarity,
-      hasThirdStat: row.hasThirdStat !== 0,
-    })),
+    plateLevels: readLevels(db),
+    plates: readPlates(db),
+    characterHeraldry: readHeraldryRows(db),
   };
 }
 

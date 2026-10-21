@@ -34,6 +34,24 @@ function duplicatePlateError(plateName: string, slot: number): ApiError {
   );
 }
 
+function levelInUseError(
+  value: number,
+  affectedSlots: AffectedSlotRow[],
+): ApiError {
+  const affectedCount = affectedSlots.length;
+  const message =
+    affectedCount === 0
+      ? `Level ${value} is used by heraldry slots.`
+      : `Level ${value} is used by ${affectedCount} heraldry slot${
+          affectedCount === 1 ? '' : 's'
+        }.`;
+
+  return new ApiError(409, 'LEVEL_IN_USE', message, {
+    affectedCount,
+    affectedSlots,
+  });
+}
+
 export function createHeraldryRouter(db: Database.Database): Router {
   const router = Router();
 
@@ -42,6 +60,17 @@ export function createHeraldryRouter(db: Database.Database): Router {
   );
   const selectCharacter = db.prepare('SELECT id FROM characters WHERE id = ?');
   const selectLevel = db.prepare('SELECT value FROM plate_levels WHERE value = ?');
+  const selectAffectedSlots = db.prepare(
+    `SELECT ch.character_id AS characterId, c.name AS characterName,
+            ch.plate_id AS plateId, p.name AS plateName, ch.slot
+       FROM character_heraldry ch
+       JOIN characters c ON c.id = ch.character_id
+       JOIN plates p ON p.id = ch.plate_id
+      WHERE ch.level = ?
+      ORDER BY c.name COLLATE NOCASE, ch.slot`,
+  );
+  const readAffectedSlots = (value: number): AffectedSlotRow[] =>
+    selectAffectedSlots.all(value) as AffectedSlotRow[];
 
   router.post('/levels', (req, res) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
@@ -66,27 +95,10 @@ export function createHeraldryRouter(db: Database.Database): Router {
   router.delete('/levels/:value', (req, res) => {
     const value = parsePositiveInteger(req.params.value, 'value');
 
-    const affected = db
-      .prepare(
-        `SELECT ch.character_id AS characterId, c.name AS characterName,
-                ch.plate_id AS plateId, p.name AS plateName, ch.slot
-           FROM character_heraldry ch
-           JOIN characters c ON c.id = ch.character_id
-           JOIN plates p ON p.id = ch.plate_id
-          WHERE ch.level = ?
-          ORDER BY c.name COLLATE NOCASE, ch.slot`,
-      )
-      .all(value) as AffectedSlotRow[];
+    const affected = readAffectedSlots(value);
 
     if (affected.length > 0) {
-      throw new ApiError(
-        409,
-        'LEVEL_IN_USE',
-        `Level ${value} is used by ${affected.length} heraldry slot${
-          affected.length === 1 ? '' : 's'
-        }.`,
-        { affectedCount: affected.length, affectedSlots: affected },
-      );
+      throw levelInUseError(value, affected);
     }
 
     try {
@@ -98,11 +110,7 @@ export function createHeraldryRouter(db: Database.Database): Router {
       }
     } catch (error) {
       if (isForeignKeyConstraintError(error)) {
-        throw new ApiError(
-          409,
-          'LEVEL_IN_USE',
-          `Level ${value} is used by heraldry slots.`,
-        );
+        throw levelInUseError(value, readAffectedSlots(value));
       }
       throw error;
     }

@@ -4,6 +4,7 @@ import type {
   HeraldryState,
   HeraldryStatus,
 } from '../api/types';
+import { compareNames, normalizeLimit } from './ordering';
 import { matchesName } from './search';
 
 export type HeraldryStatusFilter = 'all' | 'needs-upgrade' | 'recommended';
@@ -71,15 +72,6 @@ export interface HeraldryUpgradeList {
   items: HeraldryUpgradeItem[];
   more: number;
   allGood: boolean;
-}
-
-function compareNames(a: string, b: string): number {
-  return a.localeCompare(b, 'en', { sensitivity: 'base' });
-}
-
-function normalizeLimit(limit: number): number {
-  if (!Number.isFinite(limit)) return 0;
-  return Math.max(0, Math.floor(limit));
 }
 
 export function buildHeraldryUpgradeList(

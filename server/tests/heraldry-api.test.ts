@@ -199,6 +199,32 @@ describe('heraldry levels', () => {
     expect((await getHeraldry()).levels).toEqual([]);
   });
 
+  it('returns LEVEL_IN_USE details when the FK fallback is reached', async () => {
+    setup();
+    await addLevel(30);
+
+    // Simulate a restored database with an orphan row the joined pre-check
+    // cannot see. The foreign-key fallback must still map the RESTRICT error.
+    context.db.pragma('foreign_keys = OFF');
+    context.db
+      .prepare(
+        `INSERT INTO character_heraldry
+           (character_id, slot, plate_id, level, rarity, has_third_stat)
+         VALUES (999, 1, 999, 30, 'epic', 1)`,
+      )
+      .run();
+    context.db.pragma('foreign_keys = ON');
+
+    const response = await request(context.app)
+      .delete('/api/heraldry/levels/30')
+      .expect(409);
+    expect(response.body.error.code).toBe('LEVEL_IN_USE');
+    expect(response.body.error.details).toEqual({
+      affectedCount: 0,
+      affectedSlots: [],
+    });
+  });
+
   it('blocks deleting a level in use and reports the affected slots', async () => {
     setup();
     const characterId = await addCharacter('Raven');

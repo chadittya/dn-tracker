@@ -158,6 +158,7 @@ runs before the backup and before the transaction.
 | `server/tests/heraldry-api.test.ts` | API validation, cascade, conflict, clear, copy, and level-in-use tests. |
 | `web/src/lib/heraldry.ts` | Pure grid filters and Dashboard upgrade list. |
 | `web/src/lib/heraldry.test.ts` | Filter, sort, cap, plate-name, and no-mutation tests. |
+| `web/src/lib/ordering.ts` | Shared name comparison and limit normalization. |
 | `web/src/lib/navigation.test.ts` | Prefill hashchange decision tests. |
 | `web/src/components/HeraldryStatusBadge.tsx` | Icon + text status badges. |
 | `web/src/components/HeraldryGrid.tsx` | Full slot grid with sticky headers. |
@@ -189,7 +190,25 @@ runs before the backup and before the transaction.
 
 `server/src/seed-dev.ts` was intentionally not changed.
 
-## 5. Test results
+## 5. Code review follow-ups
+
+The `/code-review` pass found no user-facing defects in the happy path, plus
+one real driver-specific error mapping gap and several duplication issues. All
+were addressed:
+
+- `isForeignKeyConstraintError` now also recognizes
+  `SQLITE_CONSTRAINT_TRIGGER`, which SQLite uses for `ON DELETE RESTRICT`
+  violations. A regression test forces the fallback path.
+- The foreign-key fallback now returns the same `affectedCount` /
+  `affectedSlots` details as the normal in-use path. If no joined slot details
+  are available, the Manage dialog shows the server message instead of
+  remaining silent.
+- `buildSlotState` and `buildHeraldryState` share one slot construction helper.
+- Export reuses `readLevels`, `readPlates`, and `readHeraldryRows`.
+- Dashboard and heraldry lists share `compareNames` and `normalizeLimit` from
+  `web/src/lib/ordering.ts`.
+
+## 6. Test results
 
 Commands run:
 
@@ -201,8 +220,8 @@ npm run build
 
 Results:
 
-- `npm test`: **119 passed** across **12 test files**. The original 77 tests
-  still pass, plus 42 new tests.
+- `npm test`: **120 passed** across **12 test files**. The original 77 tests
+  still pass, plus 43 new tests.
 - `npm run lint`: passed with no errors or warnings.
 - `npm run build`: passed server typecheck, dev typecheck, web typecheck, and
   the Vite production build.
@@ -220,12 +239,13 @@ New coverage includes:
 - Idempotent clear and copy replacement/empty-source behavior.
 - Character-delete cascade.
 - Migration v1-to-v2 upgrade and FK cascade/restrict behavior.
+- Forced foreign-key fallback mapping to `LEVEL_IN_USE` details.
 - Import v2 round-trip, v1 heraldry clearing, and all specified invalid
   payloads.
 - Frontend filters, Dashboard sorting/capping/plate names, and prefill
   hashchange decisions.
 
-## 6. Manual acceptance checklist
+## 7. Manual acceptance checklist
 
 Automated tests cannot exercise the visual layout or real browser history
 events. The following browser checks remain:
@@ -252,7 +272,7 @@ events. The following browser checks remain:
 6. Check dark/light mode and sticky header/first column with a horizontally
    scrolling grid.
 
-## 7. Pending decision and open points
+## 8. Pending decision and open points
 
 1. **`seed:dev` heraldry data**: still awaiting the client's yes/no. No seed
    data for levels, plates, or slots was implemented.

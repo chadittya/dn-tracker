@@ -103,12 +103,12 @@ export function emptyHeraldrySlot(
   };
 }
 
-export function buildSlotState(
+function buildSlotFromRow(
   row: HeraldryRow,
   plateName: string | null,
-  levels: readonly number[],
+  levelsDesc: readonly number[],
 ): HeraldrySlot {
-  const rank = rankForLevel(row.level, sortLevelsDescending(levels));
+  const rank = rankForLevel(row.level, levelsDesc);
   return {
     characterId: row.characterId,
     slot: row.slot,
@@ -120,6 +120,14 @@ export function buildSlotState(
     hasThirdStat: row.hasThirdStat,
     status: computeStatus(row.rarity, rank, row.hasThirdStat),
   };
+}
+
+export function buildSlotState(
+  row: HeraldryRow,
+  plateName: string | null,
+  levels: readonly number[],
+): HeraldrySlot {
+  return buildSlotFromRow(row, plateName, sortLevelsDescending(levels));
 }
 
 /**
@@ -159,26 +167,15 @@ export function buildHeraldryState(
         continue;
       }
 
-      const status = computeStatus(
-        row.rarity,
-        rankForLevel(row.level, levelsDesc),
-        row.hasThirdStat,
+      const slotState = buildSlotFromRow(
+        row,
+        plateNames.get(row.plateId) ?? null,
+        levelsDesc,
       );
+      slots.push(slotState);
 
-      slots.push({
-        characterId: character.id,
-        slot: slotNumber,
-        isEmpty: false,
-        plateId: row.plateId,
-        plateName: plateNames.get(row.plateId) ?? null,
-        level: row.level,
-        rarity: row.rarity,
-        hasThirdStat: row.hasThirdStat,
-        status,
-      });
-
-      if (status === 'needs-upgrade') needsUpgrade += 1;
-      else if (status === 'recommended') recommended += 1;
+      if (slotState.status === 'needs-upgrade') needsUpgrade += 1;
+      else if (slotState.status === 'recommended') recommended += 1;
       else ok += 1;
     }
 

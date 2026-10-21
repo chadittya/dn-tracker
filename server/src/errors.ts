@@ -38,11 +38,15 @@ export function isUniqueConstraintError(error: unknown): boolean {
 }
 
 export function isForeignKeyConstraintError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error)) {
+    return false;
+  }
+
+  const code = (error as { code?: unknown }).code;
   return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code?: unknown }).code === 'SQLITE_CONSTRAINT_FOREIGNKEY'
+    code === 'SQLITE_CONSTRAINT_FOREIGNKEY' ||
+    // SQLite reports ON DELETE RESTRICT violations as constraint triggers.
+    code === 'SQLITE_CONSTRAINT_TRIGGER'
   );
 }
 

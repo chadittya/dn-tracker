@@ -3,6 +3,7 @@ import type {
   Dashboard,
   NestProgress,
 } from '../api/types';
+import { compareNames, normalizeLimit } from './ordering';
 
 export const CHARACTER_LIMIT = 10;
 export const NEST_LIMIT = 5;
@@ -17,15 +18,6 @@ export interface DashboardLists {
   topNests: DashboardNestItem[];
   moreNests: number;
   allDone: boolean;
-}
-
-function compareNames(a: string, b: string): number {
-  return a.localeCompare(b, 'en', { sensitivity: 'base' });
-}
-
-function normalizeLimit(limit: number): number {
-  if (!Number.isFinite(limit)) return 0;
-  return Math.max(0, Math.floor(limit));
 }
 
 export function buildDashboardLists(
