@@ -1,12 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppShell } from './components/AppShell';
 import {
-  keepsHeraldryPrefillOnHashChange,
+  characterPrefillForTab,
+  keepsCharacterPrefillOnHashChange,
   readTabFromHash,
 } from './lib/navigation';
-import type { Navigate, Tab } from './lib/navigation';
+import type {
+  CharacterPrefill,
+  Navigate,
+  Tab,
+} from './lib/navigation';
 import { BackupPage } from './pages/BackupPage';
 import { DashboardPage } from './pages/DashboardPage';
+import { EngravingPage } from './pages/EngravingPage';
 import { HeraldryPage } from './pages/HeraldryPage';
 import { ManagePage } from './pages/ManagePage';
 import { MatrixPage } from './pages/MatrixPage';
@@ -15,7 +21,7 @@ import { AppStateProvider } from './state/AppStateProvider';
 
 export default function App() {
   const [tab, setTab] = useState<Tab>(readTabFromHash);
-  const [heraldryPrefill, setHeraldryPrefill] = useState<string | undefined>(
+  const [prefill, setPrefill] = useState<CharacterPrefill | undefined>(
     undefined,
   );
   const pendingHashRef = useRef<string | null>(null);
@@ -27,10 +33,8 @@ export default function App() {
 
       // Our own navigate() caused this event: keep the one-shot prefill.
       // Back/forward or an external hash edit is the only path that clears it.
-      if (
-        !keepsHeraldryPrefillOnHashChange(expected, window.location.hash)
-      ) {
-        setHeraldryPrefill(undefined);
+      if (!keepsCharacterPrefillOnHashChange(expected, window.location.hash)) {
+        setPrefill(undefined);
       }
 
       setTab(readTabFromHash());
@@ -42,7 +46,11 @@ export default function App() {
 
   const navigate = useCallback<Navigate>((next, options) => {
     const hash = `#/${next}`;
-    setHeraldryPrefill(options?.characterQuery);
+    setPrefill(
+      options?.characterQuery === undefined
+        ? undefined
+        : { tab: next, characterQuery: options.characterQuery },
+    );
     if (window.location.hash !== hash) {
       pendingHashRef.current = hash;
       window.location.hash = hash;
@@ -58,7 +66,13 @@ export default function App() {
         {tab === 'heraldry' && (
           <HeraldryPage
             onNavigate={navigate}
-            initialCharacterQuery={heraldryPrefill}
+            initialCharacterQuery={characterPrefillForTab(prefill, 'heraldry')}
+          />
+        )}
+        {tab === 'engraving' && (
+          <EngravingPage
+            onNavigate={navigate}
+            initialCharacterQuery={characterPrefillForTab(prefill, 'engraving')}
           />
         )}
         {tab === 'dashboard' && <DashboardPage onNavigate={navigate} />}

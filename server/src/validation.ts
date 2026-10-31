@@ -1,4 +1,10 @@
 import { ApiError } from './errors';
+import {
+  ENGRAVING_CATEGORIES,
+  ENGRAVING_GRADES,
+  ENGRAVING_SLOT_COUNT,
+} from './engraving';
+import type { EngravingCategory, EngravingGrade } from './engraving';
 import { HERALDRY_SLOT_COUNT } from './heraldry';
 import type { HeraldryRarity } from './heraldry';
 
@@ -61,6 +67,54 @@ export function parseSlot(value: unknown, field = 'slot'): number {
     );
   }
   return slot;
+}
+
+export function parseEngravingSlot(value: unknown, field = 'slot'): number {
+  const slot = parseId(value, field);
+  if (slot > ENGRAVING_SLOT_COUNT) {
+    throw new ApiError(
+      400,
+      'VALIDATION_ERROR',
+      `${field} must be between 1 and ${ENGRAVING_SLOT_COUNT}.`,
+    );
+  }
+  return slot;
+}
+
+export function parseEngravingCategory(
+  value: unknown,
+  field = 'category',
+): EngravingCategory {
+  if (
+    typeof value === 'string' &&
+    (ENGRAVING_CATEGORIES as readonly string[]).includes(value)
+  ) {
+    return value as EngravingCategory;
+  }
+
+  throw new ApiError(
+    400,
+    'VALIDATION_ERROR',
+    `${field} must be "weapon", "armor", "accessory", or "wtd".`,
+  );
+}
+
+export function parseEngravingGrade(
+  value: unknown,
+  field = 'grade',
+): EngravingGrade {
+  if (
+    typeof value === 'string' &&
+    (ENGRAVING_GRADES as readonly string[]).includes(value)
+  ) {
+    return value as EngravingGrade;
+  }
+
+  throw new ApiError(
+    400,
+    'VALIDATION_ERROR',
+    `${field} must be "rare", "epic", "unique", or "legend".`,
+  );
 }
 
 export function parseRarity(

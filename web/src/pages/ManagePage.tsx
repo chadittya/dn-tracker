@@ -1,4 +1,5 @@
 import { api } from '../api/client';
+import { EngravingValuesSection } from '../components/EngravingValuesSection';
 import { EntitySection } from '../components/EntitySection';
 import { LoadingState } from '../components/LoadingState';
 import { PlateLevelSection } from '../components/PlateLevelSection';
@@ -17,6 +18,7 @@ export function ManagePage() {
         <p className="muted mt-1">
           Characters and nests have a name only. Every character is tracked on
           every nest. Plate levels and plates are used by the Heraldry tab.
+          Engraving value tables are used by the Engraving tab.
         </p>
       </div>
 
@@ -30,7 +32,7 @@ export function ManagePage() {
           addLabel="Add character"
           emptyText="No characters yet."
           deleteWarning={(name) =>
-            `All recorded runs for ${name} across all weeks and all heraldry slots for ${name} will also be deleted. This cannot be undone.`
+            `All recorded runs for ${name} across all weeks, all heraldry slots for ${name}, and all engraving slots for ${name} will also be deleted. This cannot be undone.`
           }
           onAdd={async (name) => {
             await api.createCharacter(name);
@@ -118,6 +120,24 @@ export function ManagePage() {
           }}
         />
       </div>
+
+      <EngravingValuesSection
+        categories={state.engraving.categories}
+        grades={state.engraving.grades}
+        valueTables={state.engraving.valueTables}
+        onAdd={async (input) => {
+          await api.createEngravingValue(input);
+          await refresh();
+        }}
+        onUpdate={async (id, input) => {
+          await api.updateEngravingValue(id, input);
+          await refresh();
+        }}
+        onDelete={async (id) => {
+          await api.deleteEngravingValue(id);
+          await refresh();
+        }}
+      />
     </div>
   );
 }

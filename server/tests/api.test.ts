@@ -259,5 +259,7 @@ describe('state payload', () => {
       { characterId: luna, name: 'Luna', remaining: 1 },
       { characterId: raven, name: 'Raven', remaining: 0 },
     ]);
+    expect(response.body.engraving.slotCount).toBe(14);
+    expect(response.body.engraving.slots).toHaveLength(28);
   });
 });

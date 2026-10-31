@@ -1,5 +1,20 @@
 import type Database from 'better-sqlite3';
 import { ApiError } from './errors';
+import {
+  compareEngravingValues,
+  ENGRAVING_CATEGORIES,
+  slotDefinition,
+} from './engraving';
+import type {
+  CharacterEngravingRow,
+  EngravingCategory,
+  EngravingGrade,
+  EngravingValue,
+} from './engraving';
+import {
+  readCharacterEngravingRows,
+  readEngravingValues,
+} from './engravingData';
 import type { HeraldryRarity } from './heraldry';
 import {
   readHeraldryRows,
@@ -11,6 +26,8 @@ import type { BackupService } from './backup';
 import {
   foldNameForComparison,
   parseBoolean,
+  parseEngravingGrade,
+  parseEngravingSlot,
   parseId,
   parseName,
   parsePositiveInteger,
@@ -52,8 +69,28 @@ export interface ExportHeraldry {
   hasThirdStat: boolean;
 }
 
+export interface ExportEngravingValue {
+  id: number;
+  grade: EngravingGrade;
+  firstStatValue: number;
+  secondStatValue: number | null;
+}
+
+export type ExportEngravingValues = Record<
+  EngravingCategory,
+  ExportEngravingValue[]
+>;
+
+export interface ExportEngraving {
+  characterId: number;
+  slot: number;
+  valueId: number;
+  thirdStatName: string | null;
+  thirdStatValue: number | null;
+}
+
 export interface ExportData {
-  version: 2;
+  version: 3;
   exportedAt: string;
   characters: ExportCharacter[];
   nests: ExportNest[];
@@ -61,15 +98,20 @@ export interface ExportData {
   plateLevels: number[];
   plates: ExportPlate[];
   characterHeraldry: ExportHeraldry[];
+  engravingValues: ExportEngravingValues;
+  characterEngraving: ExportEngraving[];
 }
 
 interface ValidatedImport {
+  version: 1 | 2 | 3;
   characters: ExportCharacter[];
   nests: ExportNest[];
   runs: ExportRun[];
   plateLevels: number[];
   plates: ExportPlate[];
   characterHeraldry: ExportHeraldry[];
+  engravingValues: EngravingValue[];
+  characterEngraving: CharacterEngravingRow[];
 }
 
 function invalid(message: string): never {
@@ -231,12 +273,172 @@ function validateHeraldryEntries(
   return result;
 }
 
+function validateEngravingValues(
+  raw: unknown,
+  label: string,
+): EngravingValue[] {
+  const record = asRecord(raw, label);
+  const ids = new Set<number>();
+  const naturalKeys = new Set<string>();
+  const result: EngravingValue[] = [];
+
+  for (const category of ENGRAVING_CATEGORIES) {
+    const entries = asArray(record[category], `${label}.${category}`);
+
+    entries.forEach((entry, index) => {
+      const prefix = `${label}.${category}[${index}]`;
+      const valueRecord = asRecord(entry, prefix);
+      const id = withLabel(`${prefix}.id`, () => parseId(valueRecord.id));
+      const grade = withLabel(`${prefix}.grade`, () =>
+        parseEngravingGrade(valueRecord.grade),
+      );
+      const firstStatValue = withLabel(`${prefix}.firstStatValue`, () =>
+        parsePositiveInteger(valueRecord.firstStatValue, 'firstStatValue'),
+      );
+
+      let secondStatValue: number | null;
+      if (category === 'weapon' || category === 'armor') {
+        if (
+          valueRecord.secondStatValue !== undefined &&
+          valueRecord.secondStatValue !== null
+        ) {
+          invalid(
+            `${prefix}.secondStatValue must be absent for weapon and armor values.`,
+          );
+        }
+        secondStatValue = null;
+      } else {
+        if (
+          valueRecord.secondStatValue === undefined ||
+          valueRecord.secondStatValue === null
+        ) {
+          invalid(
+            `${prefix}.secondStatValue is required for accessory and W/T/D values.`,
+          );
+        }
+        secondStatValue = withLabel(`${prefix}.secondStatValue`, () =>
+          parsePositiveInteger(valueRecord.secondStatValue, 'secondStatValue'),
+        );
+      }
+
+      if (ids.has(id)) invalid(`Duplicate engraving value id ${id}.`);
+      ids.add(id);
+
+      const naturalKey = `${category}:${grade}:${firstStatValue}`;
+      if (naturalKeys.has(naturalKey)) {
+        invalid(
+          `Duplicate engraving value for ${category} ${grade} ${firstStatValue}.`,
+        );
+      }
+      naturalKeys.add(naturalKey);
+
+      result.push({
+        id,
+        category,
+        grade,
+        firstStatValue,
+        secondStatValue,
+      });
+    });
+  }
+
+  return result;
+}
+
+function validateCharacterEngraving(
+  raw: unknown,
+  label: string,
+  characterIds: ReadonlySet<number>,
+  valuesById: ReadonlyMap<number, EngravingValue>,
+): CharacterEngravingRow[] {
+  const entries = asArray(raw, label);
+  const slotKeys = new Set<string>();
+  const result: CharacterEngravingRow[] = [];
+
+  entries.forEach((entry, index) => {
+    const prefix = `${label}[${index}]`;
+    const record = asRecord(entry, prefix);
+    const characterId = withLabel(`${prefix}.characterId`, () =>
+      parseId(record.characterId),
+    );
+    const slot = withLabel(`${prefix}.slot`, () =>
+      parseEngravingSlot(record.slot),
+    );
+    const valueId = withLabel(`${prefix}.valueId`, () =>
+      parseId(record.valueId),
+    );
+
+    if (!characterIds.has(characterId)) {
+      invalid(`${prefix} references unknown character ${characterId}.`);
+    }
+
+    const value = valuesById.get(valueId);
+    if (!value) {
+      invalid(`${prefix} references unknown engraving value ${valueId}.`);
+    }
+
+    const definition = slotDefinition(slot);
+    if (!definition || value.category !== definition.category) {
+      invalid(
+        `${prefix} engraving value category does not match slot ${slot}.`,
+      );
+    }
+
+    const slotKey = `${characterId}:${slot}`;
+    if (slotKeys.has(slotKey)) {
+      invalid(
+        `Duplicate engraving slot for character ${characterId}, slot ${slot}.`,
+      );
+    }
+    slotKeys.add(slotKey);
+
+    const rawName = record.thirdStatName;
+    const rawValue = record.thirdStatValue;
+    const nameAbsent =
+      rawName === undefined ||
+      rawName === null ||
+      (typeof rawName === 'string' && rawName.trim() === '');
+    const valueAbsent = rawValue === undefined || rawValue === null;
+
+    if (nameAbsent !== valueAbsent) {
+      invalid(
+        `${prefix}: thirdStatName and thirdStatValue must both be provided or both omitted.`,
+      );
+    }
+
+    const thirdStatName = nameAbsent
+      ? null
+      : validateName(rawName, `${prefix}.thirdStatName`);
+    const thirdStatValue = valueAbsent
+      ? null
+      : withLabel(`${prefix}.thirdStatValue`, () =>
+          parsePositiveInteger(rawValue, 'thirdStatValue'),
+        );
+
+    result.push({
+      characterId,
+      slot,
+      valueId,
+      thirdStatName,
+      thirdStatValue,
+    });
+  });
+
+  return result;
+}
+
 export function validateImportPayload(raw: unknown): ValidatedImport {
   const payload = asRecord(raw, 'Import payload');
 
-  if (payload.version !== 1 && payload.version !== 2) {
-    invalid('Unsupported import version. Expected version 1 or 2.');
+  if (
+    payload.version !== 1 &&
+    payload.version !== 2 &&
+    payload.version !== 3
+  ) {
+    invalid('Unsupported import version. Expected version 1, 2, or 3.');
   }
+
+  const version = payload.version;
 
   const characters = validateNamedEntries(payload.characters, 'characters');
   const nests = validateNamedEntries(payload.nests, 'nests');
@@ -298,7 +500,7 @@ export function validateImportPayload(raw: unknown): ValidatedImport {
   let plates: ExportPlate[] = [];
   let characterHeraldry: ExportHeraldry[] = [];
 
-  if (payload.version === 2) {
+  if (version === 2 || version === 3) {
     plateLevels = validatePlateLevels(payload.plateLevels, 'plateLevels');
     plates = validateNamedEntries(payload.plates, 'plates');
     const plateIds = new Set(plates.map((plate) => plate.id));
@@ -311,19 +513,59 @@ export function validateImportPayload(raw: unknown): ValidatedImport {
     );
   }
 
+  let engravingValues: EngravingValue[] = [];
+  let characterEngraving: CharacterEngravingRow[] = [];
+
+  if (version === 3) {
+    engravingValues = validateEngravingValues(
+      payload.engravingValues,
+      'engravingValues',
+    );
+    const valuesById = new Map(
+      engravingValues.map((value) => [value.id, value]),
+    );
+    characterEngraving = validateCharacterEngraving(
+      payload.characterEngraving,
+      'characterEngraving',
+      characterIds,
+      valuesById,
+    );
+  }
+
   return {
+    version,
     characters,
     nests,
     runs,
     plateLevels,
     plates,
     characterHeraldry,
+    engravingValues,
+    characterEngraving,
   };
 }
 
 export function exportData(db: Database.Database, now: Date): ExportData {
+  const engravingValues: ExportEngravingValues = {
+    weapon: [],
+    armor: [],
+    accessory: [],
+    wtd: [],
+  };
+
+  for (const value of [...readEngravingValues(db)].sort(
+    compareEngravingValues,
+  )) {
+    engravingValues[value.category].push({
+      id: value.id,
+      grade: value.grade,
+      firstStatValue: value.firstStatValue,
+      secondStatValue: value.secondStatValue,
+    });
+  }
+
   return {
-    version: 2,
+    version: 3,
     exportedAt: now.toISOString(),
     characters: db
       .prepare(
@@ -344,6 +586,8 @@ export function exportData(db: Database.Database, now: Date): ExportData {
     plateLevels: readLevels(db),
     plates: readPlates(db),
     characterHeraldry: readHeraldryRows(db),
+    engravingValues,
+    characterEngraving: readCharacterEngravingRows(db),
   };
 }
 
@@ -360,6 +604,8 @@ export async function importData(
     plateLevels: number;
     plates: number;
     heraldrySlots: number;
+    engravingValues: number;
+    engravingSlots: number;
   };
   backup: string;
 }> {
@@ -370,6 +616,11 @@ export async function importData(
   const fallbackTimestamp = now().toISOString();
 
   const replace = db.transaction(() => {
+    db.prepare('DELETE FROM character_engraving').run();
+    if (data.version === 3) {
+      db.prepare('DELETE FROM engraving_values').run();
+    }
+
     db.prepare('DELETE FROM character_heraldry').run();
     db.prepare('DELETE FROM plates').run();
     db.prepare('DELETE FROM plate_levels').run();
@@ -441,6 +692,36 @@ export async function importData(
         slot.hasThirdStat ? 1 : 0,
       );
     }
+
+    const insertEngravingValue = db.prepare(
+      `INSERT INTO engraving_values
+         (id, category, grade, first_stat_value, second_stat_value)
+       VALUES (?, ?, ?, ?, ?)`,
+    );
+    for (const value of data.engravingValues) {
+      insertEngravingValue.run(
+        value.id,
+        value.category,
+        value.grade,
+        value.firstStatValue,
+        value.secondStatValue,
+      );
+    }
+
+    const insertEngraving = db.prepare(
+      `INSERT INTO character_engraving
+         (character_id, slot, value_id, third_stat_name, third_stat_value)
+       VALUES (?, ?, ?, ?, ?)`,
+    );
+    for (const slot of data.characterEngraving) {
+      insertEngraving.run(
+        slot.characterId,
+        slot.slot,
+        slot.valueId,
+        slot.thirdStatName,
+        slot.thirdStatValue,
+      );
+    }
   });
 
   replace();
@@ -453,6 +734,8 @@ export async function importData(
       plateLevels: data.plateLevels.length,
       plates: data.plates.length,
       heraldrySlots: data.characterHeraldry.length,
+      engravingValues: data.engravingValues.length,
+      engravingSlots: data.characterEngraving.length,
     },
     backup: backup.filename,
   };

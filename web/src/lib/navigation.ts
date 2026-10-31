@@ -2,6 +2,7 @@ export type Tab =
   | 'runs'
   | 'matrix'
   | 'heraldry'
+  | 'engraving'
   | 'dashboard'
   | 'backup'
   | 'manage';
@@ -12,10 +13,16 @@ export interface NavigateOptions {
 
 export type Navigate = (tab: Tab, options?: NavigateOptions) => void;
 
+export interface CharacterPrefill {
+  tab: Tab;
+  characterQuery: string;
+}
+
 export const TABS: ReadonlyArray<{ id: Tab; label: string }> = [
   { id: 'runs', label: 'Runs' },
   { id: 'matrix', label: 'Matrix' },
   { id: 'heraldry', label: 'Heraldry' },
+  { id: 'engraving', label: 'Engraving' },
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'backup', label: 'Backup' },
   { id: 'manage', label: 'Manage' },
@@ -23,9 +30,24 @@ export const TABS: ReadonlyArray<{ id: Tab; label: string }> = [
 
 const TAB_IDS = new Set<string>(TABS.map((tab) => tab.id));
 
-export function readTabFromHash(): Tab {
-  const raw = window.location.hash.replace(/^#\/?/, '');
+export function parseTabFromHash(hash: string): Tab {
+  const raw = hash.replace(/^#\/?/, '');
   return TAB_IDS.has(raw) ? (raw as Tab) : 'runs';
+}
+
+export function readTabFromHash(): Tab {
+  return parseTabFromHash(window.location.hash);
+}
+
+/**
+ * A Dashboard prefill applies only to the tab it was created for. A Heraldry
+ * row must not prefill Engraving and vice versa.
+ */
+export function characterPrefillForTab(
+  prefill: CharacterPrefill | undefined,
+  tab: Tab,
+): string | undefined {
+  return prefill?.tab === tab ? prefill.characterQuery : undefined;
 }
 
 /**
@@ -33,7 +55,7 @@ export function readTabFromHash(): Tab {
  * matches the current hash. Back/forward and manual hash edits have no pending
  * hash (or a stale one) and must clear the one-shot Dashboard prefill.
  */
-export function keepsHeraldryPrefillOnHashChange(
+export function keepsCharacterPrefillOnHashChange(
   pendingHash: string | null,
   currentHash: string,
 ): boolean {

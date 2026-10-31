@@ -1,8 +1,8 @@
 # Dragon Nest Run Tracker
 
 Local-only web app to track which characters have run which nests this week,
-plus each character's persistent 8-slot heraldry loadout. Single user, runs on
-one PC at http://localhost:3000. No login.
+plus each character's persistent 8-slot heraldry loadout and 14-slot engraving
+loadout. Single user, runs on one PC at http://localhost:3000. No login.
 
 ## Stack
 
@@ -77,13 +77,47 @@ one PC at http://localhost:3000. No login.
   all of its heraldry.
 - Copying heraldry replaces every slot on the target character; copying from an
   empty source leaves the target empty. Source and target must differ.
-- Export JSON is `version: 2` and includes `plateLevels`, `plates`, and
-  `characterHeraldry`. Import accepts version 1 and version 2. A version 1
+- Export JSON is `version: 3` and includes `plateLevels`, `plates`, and
+  `characterHeraldry`. Import accepts versions 1, 2, and 3. A version 1 or 2
   file has no heraldry arrays, so importing one clears current heraldry.
+
+### Engraving (v3.2)
+
+- Every character has `ENGRAVING_SLOT_COUNT = 14` fixed slots: Main weapon,
+  Secondary weapon, Head, Upper, Lower, Gloves, Boots, Necklace, Earring,
+  Ring 1, Ring 2, Wings, Tail, Decal. Slots map to four categories: weapon
+  (1-2), armor (3-7), accessory (8-11), and W/T/D (12-14).
+- A filled slot stores one engraving value (category, grade, first stat, and
+  an optional paired second stat), plus an optional free-text third stat with
+  its own value.
+- Grades are ordered `rare < epic < unique < legend`. Rates are stored as
+  integer hundredths of a percent everywhere (`28` = `0.28%`).
+- Engraving is persistent. The weekly reset does not touch it and there is no
+  `week_key` or status on engraving rows.
+- Four value tables (weapon, armor, accessory, W/T/D) are managed in Manage.
+  Weapon and armor values have only a first stat. Accessory values pair the
+  first stat with Max HP; W/T/D values pair it with Crit. Deleting a value in
+  use is blocked; deleting an unused value is allowed. There is no grade or
+  category edit.
+- Editing a value row's first stat can change its order in the table and
+  therefore the finder's lower-than results.
+- The finder lists characters whose chosen slot is empty or holds a lower
+  value. Lower means a lower grade, or the same grade with a lower first stat.
+  Equal or higher values are excluded. Empty slots come first, then values by
+  grade and first stat, then character name.
+- A character cannot use the same plate in two heraldry slots. Engraving
+  values may repeat across slots. Deleting a character cascades to all of its
+  engraving.
+- Export `version: 3` adds `engravingValues` (four category arrays with
+  explicit ids) and `characterEngraving`. A missing category array is invalid;
+  an empty array is valid. Importing a version 1 or 2 file clears character
+  engraving but keeps the current engraving value tables. Importing version 3
+  replaces both.
 
 ## Database rules
 
-- Tables: characters, nests, runs, plate_levels, plates, character_heraldry.
+- Tables: characters, nests, runs, plate_levels, plates, character_heraldry,
+  engraving_values, character_engraving.
 - runs: (character_id, nest_id, week_key, completed_at), PRIMARY KEY
   (character_id, nest_id, week_key). Toggle = insert/delete the row.
 - plate_levels: `value INTEGER NOT NULL UNIQUE CHECK (value > 0)`; the level
@@ -94,9 +128,17 @@ one PC at http://localhost:3000. No login.
 - character_heraldry has `CHECK (slot >= 1)`; the upper bound
   `HERALDRY_SLOT_COUNT` is enforced by routes, validation, and import, not by
   database DDL.
+- engraving_values: id, category, grade, first_stat_value, second_stat_value,
+  with `UNIQUE (category, grade, first_stat_value)`. Weapon and armor must have
+  no second stat; accessory and W/T/D must have a positive second stat.
+- character_engraving: (character_id, slot, value_id, third_stat_name,
+  third_stat_value), PRIMARY KEY (character_id, slot). Third-stat name and
+  value are both null or both populated; `CHECK (slot >= 1)` with the upper
+  bound `ENGRAVING_SLOT_COUNT` enforced outside DDL. Category-to-slot matching
+  is enforced by routes and import.
 - `PRAGMA foreign_keys = ON`. Runs, plate references, and character references
-  use `ON DELETE CASCADE`; `character_heraldry.level` uses
-  `ON DELETE RESTRICT`.
+  use `ON DELETE CASCADE`; `character_heraldry.level` and
+  `character_engraving.value_id` use `ON DELETE RESTRICT`.
 - Names use `COLLATE NOCASE` with a UNIQUE constraint.
 - Schema changes only via ordered migrations tracked with `PRAGMA user_version`.
   Migrations run automatically on server start, inside a transaction.
@@ -119,6 +161,12 @@ one PC at http://localhost:3000. No login.
 - All heraldry status logic lives in `server/src/heraldry.ts` as pure functions.
   The frontend renders the status returned by the API and never recomputes
   ranks or statuses.
+- All engraving slot definitions, value ordering, lower-than logic, and finder
+  results live in `server/src/engraving.ts` as pure functions. The frontend
+  renders the API result and never recomputes grades or lower-than.
+- Percent parsing and formatting on the frontend live in
+  `web/src/lib/engraving.ts` and use string/integer maths only, never float
+  multiplication or `toFixed`. Values cross the API as integer hundredths.
 - The API returns `weekKey` and `nextResetAt`; the frontend uses these and never
   recomputes week boundaries itself.
 - Server binds to 127.0.0.1 only. Dev serves Vite through the same HTTP server

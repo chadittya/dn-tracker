@@ -1,5 +1,6 @@
 import type { Navigate } from '../lib/navigation';
 import { buildDashboardLists } from '../lib/dashboard';
+import { buildEngravingEmptyList } from '../lib/engraving';
 import { buildHeraldryUpgradeList } from '../lib/heraldry';
 import { useAppState } from '../state/context';
 import { DashboardListSection } from '../components/DashboardListSection';
@@ -34,6 +35,7 @@ export function DashboardPage({
   const { dashboard } = state;
   const lists = buildDashboardLists(dashboard);
   const heraldryList = buildHeraldryUpgradeList(state.heraldry);
+  const engravingList = buildEngravingEmptyList(state.engraving.perCharacter);
   const percent =
     dashboard.total > 0
       ? Math.round((dashboard.done / dashboard.total) * 100)
@@ -181,6 +183,43 @@ export function DashboardPage({
           ))}
         </DashboardListSection>
       )}
+
+      <DashboardListSection
+        title="Engraving empty slots"
+        description="Characters missing the most engraving slots, ranked by empty count."
+        actionLabel="View all"
+        onAction={() => onNavigate('engraving')}
+        isEmpty={engravingList.items.length === 0}
+        emptyMessage="All engraving slots are filled."
+        moreCount={engravingList.more}
+        moreLabel="characters"
+      >
+        {engravingList.items.map((item) => (
+          <button
+            key={item.characterId}
+            type="button"
+            onClick={() =>
+              onNavigate('engraving', { characterQuery: item.name })
+            }
+            className="flex min-h-14 w-full flex-col gap-2 rounded-xl border border-slate-200 p-3 text-left transition-colors hover:border-indigo-400 hover:bg-indigo-50/50 dark:border-slate-800 dark:hover:border-indigo-500 dark:hover:bg-indigo-950/20 sm:flex-row sm:items-center sm:justify-between"
+          >
+            <span className="min-w-0">
+              <span className="block truncate font-medium">{item.name}</span>
+              <span className="muted block truncate">
+                {item.slots.join(', ')}
+                {item.hiddenSlotCount > 0
+                  ? ` +${item.hiddenSlotCount}`
+                  : ''}
+                {' · '}
+                {item.emptyCount} empty
+              </span>
+            </span>
+            <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold tabular-nums text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+              {item.emptyCount} empty
+            </span>
+          </button>
+        ))}
+      </DashboardListSection>
     </div>
   );
 }

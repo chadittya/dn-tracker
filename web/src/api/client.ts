@@ -2,6 +2,14 @@ import type {
   AppState,
   BackupInfo,
   Character,
+  EngravingAffectedSlot,
+  EngravingCategory,
+  EngravingFinderResult,
+  EngravingGrade,
+  EngravingSlot,
+  EngravingSlotDefinition,
+  EngravingValue,
+  EngravingValueUsageResponse,
   HeraldryAffectedSlot,
   HeraldryPlate,
   HeraldryRarity,
@@ -12,6 +20,7 @@ import type {
 
 export interface ApiErrorDetails {
   affectedSlots?: HeraldryAffectedSlot[];
+  affectedEngravingSlots?: EngravingAffectedSlot[];
   affectedCount?: number;
   conflictingSlot?: number;
 }
@@ -174,6 +183,65 @@ export const api = {
     request<{ copied: number }>('/api/heraldry/copy', {
       method: 'POST',
       body: jsonBody({ sourceCharacterId, targetCharacterId }),
+    }),
+
+  createEngravingValue: (input: {
+    category: EngravingCategory;
+    grade: EngravingGrade;
+    firstStatValue: number;
+    secondStatValue?: number | null;
+  }) =>
+    request<{ value: EngravingValue }>('/api/engraving/values', {
+      method: 'POST',
+      body: jsonBody(input),
+    }),
+
+  updateEngravingValue: (
+    id: number,
+    input: {
+      firstStatValue: number;
+      secondStatValue?: number | null;
+    },
+  ) =>
+    request<{ value: EngravingValue }>(`/api/engraving/values/${id}`, {
+      method: 'PATCH',
+      body: jsonBody(input),
+    }),
+
+  deleteEngravingValue: (id: number) =>
+    request<void>(`/api/engraving/values/${id}`, { method: 'DELETE' }),
+
+  getEngravingValueUsage: (id: number) =>
+    request<EngravingValueUsageResponse>(
+      `/api/engraving/values/${id}/usage`,
+    ),
+
+  getEngravingFinder: (slot: number, valueId: number) =>
+    request<{
+      slot: EngravingSlotDefinition;
+      targetValue: EngravingValue;
+      results: EngravingFinderResult[];
+    }>(
+      `/api/engraving/finder?slot=${encodeURIComponent(
+        String(slot),
+      )}&valueId=${encodeURIComponent(String(valueId))}`,
+    ),
+
+  setEngravingSlot: (input: {
+    characterId: number;
+    slot: number;
+    valueId: number;
+    thirdStatName?: string | null;
+    thirdStatValue?: number | null;
+  }) =>
+    request<{ slot: EngravingSlot }>('/api/engraving/slots', {
+      method: 'PUT',
+      body: jsonBody(input),
+    }),
+
+  clearEngravingSlot: (characterId: number, slot: number) =>
+    request<void>(`/api/engraving/slots/${characterId}/${slot}`, {
+      method: 'DELETE',
     }),
 
   getBackups: () =>

@@ -104,6 +104,55 @@ function validV2Payload() {
   };
 }
 
+function validV3Payload() {
+  return {
+    ...validV2Payload(),
+    version: 3,
+    engravingValues: {
+      weapon: [
+        { id: 40, grade: 'rare', firstStatValue: 20, secondStatValue: null },
+      ],
+      armor: [
+        { id: 41, grade: 'unique', firstStatValue: 108, secondStatValue: null },
+      ],
+      accessory: [
+        { id: 42, grade: 'epic', firstStatValue: 28, secondStatValue: 56 },
+      ],
+      wtd: [{ id: 43, grade: 'epic', firstStatValue: 26, secondStatValue: 70 }],
+    },
+    characterEngraving: [
+      {
+        characterId: 10,
+        slot: 1,
+        valueId: 40,
+        thirdStatName: 'Critical Damage',
+        thirdStatValue: 125,
+      },
+      {
+        characterId: 10,
+        slot: 3,
+        valueId: 41,
+        thirdStatName: null,
+        thirdStatValue: null,
+      },
+      {
+        characterId: 10,
+        slot: 8,
+        valueId: 42,
+        thirdStatName: null,
+        thirdStatValue: null,
+      },
+      {
+        characterId: 10,
+        slot: 12,
+        valueId: 43,
+        thirdStatName: null,
+        thirdStatValue: null,
+      },
+    ],
+  };
+}
+
 describe('import', () => {
   it('replaces all data and creates a pre-import backup', async () => {
     setup();
@@ -134,6 +183,8 @@ describe('import', () => {
       plateLevels: 0,
       plates: 0,
       heraldrySlots: 0,
+      engravingValues: 0,
+      engravingSlots: 0,
     });
     expect(response.body.backup).toMatch(/^preimport-\d{8}-\d{6}\.db$/);
 
@@ -187,6 +238,13 @@ describe('import', () => {
          VALUES (?, 1, ?, 30, 'epic', 1)`,
       )
       .run(characterId, plateId);
+    context.db
+      .prepare(
+        `INSERT INTO character_engraving
+           (character_id, slot, value_id, third_stat_name, third_stat_value)
+         VALUES (?, 1, 1, ?, 25)`,
+      )
+      .run(characterId, 'Critical Damage');
 
     const response = await request(context.app)
       .post('/api/data/import')
@@ -200,7 +258,20 @@ describe('import', () => {
       plateLevels: 0,
       plates: 0,
       heraldrySlots: 0,
+      engravingValues: 0,
+      engravingSlots: 0,
     });
+
+    expect(
+      context.db
+        .prepare('SELECT COUNT(*) AS count FROM engraving_values')
+        .get(),
+    ).toEqual({ count: 136 });
+    expect(
+      context.db
+        .prepare('SELECT COUNT(*) AS count FROM character_engraving')
+        .get(),
+    ).toEqual({ count: 0 });
 
     const state = (await request(context.app).get('/api/state').expect(200))
       .body;
@@ -231,13 +302,15 @@ describe('import', () => {
       plateLevels: 2,
       plates: 2,
       heraldrySlots: 2,
+      engravingValues: 0,
+      engravingSlots: 0,
     });
 
     const exported = (
       await request(context.app).get('/api/data/export').expect(200)
     ).body;
     expect(exported).toMatchObject({
-      version: 2,
+      version: 3,
       plateLevels: [30, 27],
       plates: [
         { id: 30, name: 'Bear' },
@@ -261,13 +334,23 @@ describe('import', () => {
           hasThirdStat: false,
         },
       ],
+      characterEngraving: [],
     });
+    expect(
+      Object.values(exported.engravingValues as Record<string, unknown[]>).reduce(
+        (total, rows) => total + rows.length,
+        0,
+      ),
+    ).toBe(136);
 
     const second = await request(context.app)
       .post('/api/data/import')
       .send(exported)
       .expect(200);
-    expect(second.body.imported).toEqual(first.body.imported);
+    expect(second.body.imported).toEqual({
+      ...first.body.imported,
+      engravingValues: 136,
+    });
 
     const state = (await request(context.app).get('/api/state').expect(200))
       .body;
@@ -317,6 +400,136 @@ describe('import', () => {
     ]);
   });
 
+  it('round-trips a version 3 export with engraving', async () => {
+    setup();
+
+    const first = await request(context.app)
+      .post('/api/data/import')
+      .send(validV3Payload())
+      .expect(200);
+
+    expect(first.body.imported).toEqual({
+      characters: 1,
+      nests: 1,
+      runs: 1,
+      plateLevels: 2,
+      plates: 2,
+      heraldrySlots: 2,
+      engravingValues: 4,
+      engravingSlots: 4,
+    });
+
+    const exported = (
+      await request(context.app).get('/api/data/export').expect(200)
+    ).body;
+    expect(exported.version).toBe(3);
+    expect(exported.engravingValues).toEqual({
+      weapon: [
+        { id: 40, grade: 'rare', firstStatValue: 20, secondStatValue: null },
+      ],
+      armor: [
+        { id: 41, grade: 'unique', firstStatValue: 108, secondStatValue: null },
+      ],
+      accessory: [
+        { id: 42, grade: 'epic', firstStatValue: 28, secondStatValue: 56 },
+      ],
+      wtd: [
+        { id: 43, grade: 'epic', firstStatValue: 26, secondStatValue: 70 },
+      ],
+    });
+    expect(exported.characterEngraving).toEqual(
+      validV3Payload().characterEngraving,
+    );
+
+    const second = await request(context.app)
+      .post('/api/data/import')
+      .send(exported)
+      .expect(200);
+    expect(second.body.imported).toEqual(first.body.imported);
+
+    const state = (await request(context.app).get('/api/state').expect(200))
+      .body;
+    expect(state.engraving.slotCount).toBe(14);
+    expect(state.engraving.perCharacter).toEqual([
+      {
+        characterId: 10,
+        name: 'Raven',
+        emptyCount: 10,
+        filledCount: 4,
+        emptySlots: expect.arrayContaining([
+          { slot: 2, label: 'Secondary weapon' },
+          { slot: 14, label: 'Decal' },
+        ]),
+      },
+    ]);
+  });
+
+  it('accepts empty engraving category arrays in a version 3 file', async () => {
+    setup();
+
+    const payload = {
+      ...validV3Payload(),
+      engravingValues: {
+        weapon: [],
+        armor: [],
+        accessory: [],
+        wtd: [],
+      },
+      characterEngraving: [],
+    };
+
+    const response = await request(context.app)
+      .post('/api/data/import')
+      .send(payload)
+      .expect(200);
+
+    expect(response.body.imported.engravingValues).toBe(0);
+    expect(response.body.imported.engravingSlots).toBe(0);
+
+    const state = (await request(context.app).get('/api/state').expect(200))
+      .body;
+    expect(state.engraving.valueTables).toEqual({
+      weapon: [],
+      armor: [],
+      accessory: [],
+      wtd: [],
+    });
+  });
+
+  it('clears character engraving but keeps values when importing version 2', async () => {
+    setup();
+
+    const characterId = Number(
+      context.db
+        .prepare('INSERT INTO characters (name) VALUES (?)')
+        .run('Existing')
+        .lastInsertRowid,
+    );
+    context.db
+      .prepare(
+        `INSERT INTO character_engraving
+           (character_id, slot, value_id, third_stat_name, third_stat_value)
+         VALUES (?, 1, 1, ?, 25)`,
+      )
+      .run(characterId, 'Critical Damage');
+
+    await request(context.app)
+      .post('/api/data/import')
+      .send(validV2Payload())
+      .expect(200);
+
+    expect(
+      context.db
+        .prepare('SELECT COUNT(*) AS count FROM engraving_values')
+        .get(),
+    ).toEqual({ count: 136 });
+    expect(
+      context.db
+        .prepare('SELECT COUNT(*) AS count FROM character_engraving')
+        .get(),
+    ).toEqual({ count: 0 });
+  });
+
   it('rejects invalid payloads without changing the database or creating a backup', async () => {
     setup();
 
@@ -328,7 +541,7 @@ describe('import', () => {
     const before = await fetchState(context.app);
 
     const cases: Array<{ label: string; payload: unknown }> = [
-      { label: 'bad version', payload: { ...validPayload(), version: 3 } },
+      { label: 'bad version', payload: { ...validPayload(), version: 4 } },
       {
         label: 'characters not array',
         payload: { ...validPayload(), characters: {} },
@@ -599,6 +812,224 @@ describe('import', () => {
       {
         label: 'v2 missing characterHeraldry',
         payload: { ...validV2Payload(), characterHeraldry: undefined },
+      },
+      {
+        label: 'v3 missing engravingValues',
+        payload: { ...validV3Payload(), engravingValues: undefined },
+      },
+      {
+        label: 'v3 missing category array',
+        payload: {
+          ...validV3Payload(),
+          engravingValues: { ...validV3Payload().engravingValues, weapon: undefined },
+        },
+      },
+      {
+        label: 'v3 missing characterEngraving',
+        payload: { ...validV3Payload(), characterEngraving: undefined },
+      },
+      {
+        label: 'v3 duplicate value ids across categories',
+        payload: {
+          ...validV3Payload(),
+          engravingValues: {
+            ...validV3Payload().engravingValues,
+            armor: [
+              { id: 40, grade: 'unique', firstStatValue: 108, secondStatValue: null },
+            ],
+          },
+        },
+      },
+      {
+        label: 'v3 duplicate value natural key',
+        payload: {
+          ...validV3Payload(),
+          engravingValues: {
+            ...validV3Payload().engravingValues,
+            weapon: [
+              { id: 40, grade: 'rare', firstStatValue: 20, secondStatValue: null },
+              { id: 44, grade: 'rare', firstStatValue: 20, secondStatValue: null },
+            ],
+          },
+        },
+      },
+      {
+        label: 'v3 invalid value grade',
+        payload: {
+          ...validV3Payload(),
+          engravingValues: {
+            ...validV3Payload().engravingValues,
+            weapon: [
+              { id: 40, grade: 'mythic', firstStatValue: 20, secondStatValue: null },
+            ],
+          },
+        },
+      },
+      {
+        label: 'v3 weapon with second stat',
+        payload: {
+          ...validV3Payload(),
+          engravingValues: {
+            ...validV3Payload().engravingValues,
+            weapon: [
+              { id: 40, grade: 'rare', firstStatValue: 20, secondStatValue: 10 },
+            ],
+          },
+        },
+      },
+      {
+        label: 'v3 accessory without second stat',
+        payload: {
+          ...validV3Payload(),
+          engravingValues: {
+            ...validV3Payload().engravingValues,
+            accessory: [
+              { id: 42, grade: 'epic', firstStatValue: 28, secondStatValue: null },
+            ],
+          },
+        },
+      },
+      {
+        label: 'v3 non-positive stat value',
+        payload: {
+          ...validV3Payload(),
+          engravingValues: {
+            ...validV3Payload().engravingValues,
+            weapon: [
+              { id: 40, grade: 'rare', firstStatValue: 0, secondStatValue: null },
+            ],
+          },
+        },
+      },
+      {
+        label: 'v3 duplicate character slot',
+        payload: {
+          ...validV3Payload(),
+          characterEngraving: [
+            validV3Payload().characterEngraving[0],
+            validV3Payload().characterEngraving[0],
+          ],
+        },
+      },
+      {
+        label: 'v3 unknown character reference',
+        payload: {
+          ...validV3Payload(),
+          characterEngraving: [
+            {
+              characterId: 999,
+              slot: 1,
+              valueId: 40,
+              thirdStatName: null,
+              thirdStatValue: null,
+            },
+          ],
+        },
+      },
+      {
+        label: 'v3 unknown value reference',
+        payload: {
+          ...validV3Payload(),
+          characterEngraving: [
+            {
+              characterId: 10,
+              slot: 1,
+              valueId: 999,
+              thirdStatName: null,
+              thirdStatValue: null,
+            },
+          ],
+        },
+      },
+      {
+        label: 'v3 value category does not match slot',
+        payload: {
+          ...validV3Payload(),
+          characterEngraving: [
+            {
+              characterId: 10,
+              slot: 8,
+              valueId: 40,
+              thirdStatName: null,
+              thirdStatValue: null,
+            },
+          ],
+        },
+      },
+      {
+        label: 'v3 slot 0',
+        payload: {
+          ...validV3Payload(),
+          characterEngraving: [
+            {
+              characterId: 10,
+              slot: 0,
+              valueId: 40,
+              thirdStatName: null,
+              thirdStatValue: null,
+            },
+          ],
+        },
+      },
+      {
+        label: 'v3 slot 15',
+        payload: {
+          ...validV3Payload(),
+          characterEngraving: [
+            {
+              characterId: 10,
+              slot: 15,
+              valueId: 43,
+              thirdStatName: null,
+              thirdStatValue: null,
+            },
+          ],
+        },
+      },
+      {
+        label: 'v3 third stat name without value',
+        payload: {
+          ...validV3Payload(),
+          characterEngraving: [
+            {
+              characterId: 10,
+              slot: 1,
+              valueId: 40,
+              thirdStatName: 'Critical Damage',
+              thirdStatValue: null,
+            },
+          ],
+        },
+      },
+      {
+        label: 'v3 blank third stat name with value',
+        payload: {
+          ...validV3Payload(),
+          characterEngraving: [
+            {
+              characterId: 10,
+              slot: 1,
+              valueId: 40,
+              thirdStatName: '   ',
+              thirdStatValue: 25,
+            },
+          ],
+        },
+      },
+      {
+        label: 'v3 non-positive third stat value',
+        payload: {
+          ...validV3Payload(),
+          characterEngraving: [
+            {
+              characterId: 10,
+              slot: 1,
+              valueId: 40,
+              thirdStatName: 'Critical Damage',
+              thirdStatValue: 0,
+            },
+          ],
+        },
       },
     ];
 

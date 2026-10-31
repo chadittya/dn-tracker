@@ -459,3 +459,236 @@ Automated tests cover the pure helpers; the following browser checks remain:
 None. Both approved consequences were implemented as agreed: a below-cap level
 added from a later page resets to page 1 (and may not be visible there), and
 the Manage filter note wording changes to `Filtered to X of Y`.
+
+# Review — Dragon Nest Run Tracker v3.2 Engraving
+
+## 1. Summary
+
+v3.2 adds persistent engraving tracking for every character:
+
+- 14 fixed slots per character, mapped to Weapon, Armor, Accessory, and W/T/D
+  categories.
+- Each filled slot stores a grade, a value row's first and optional paired
+  second stat, and an optional third stat with its own value.
+- Four editable value tables are managed from the Manage page and seeded by
+  migration 3 with 136 values (34 per category).
+- The finder lists characters with an empty slot or a lower value; equal and
+  higher values are excluded.
+- Migration 3 adds `engraving_values` and `character_engraving`. Schema version
+  becomes 3.
+- `GET /api/state` gains an additive `engraving` block.
+- Export is now `version: 3`; import accepts versions 1, 2, and 3.
+- The frontend gains the Engraving tab after Heraldry, Manage value tables, and
+  a Dashboard empty-slot list.
+- Engraving status is not stored and there are no status badges, no cap, no
+  target grade, no copy, no bulk entry, and no history.
+
+No new dependency was added. Week/reset behavior, run tracking, Heraldry
+business rules, and existing API fields are unchanged.
+
+## 2. Requirement checklist
+
+### Data and rules
+
+- [x] `ENGRAVING_SLOT_COUNT = 14` with the approved slot labels and category
+      mapping in `server/src/engraving.ts`.
+- [x] Grades ordered `rare < epic < unique < legend`.
+- [x] Values stored as integer hundredths everywhere; UI uses string/integer
+      parsing and formatting only.
+- [x] Migration 3 creates both new tables, the value FK index, and seeds all
+      136 rows.
+- [x] Seed data is frozen in `engravingSeed.ts` with shape assertions and is
+      not edited after migration 3.
+- [x] Weapon and armor values have no second stat; Accessory pairs Max HP and
+      W/T/D pairs Crit.
+- [x] Slot upper bound and category matching are route/import-enforced, not
+      DDL-enforced.
+- [x] Character deletes cascade to engraving; value deletes are restricted
+      while in use.
+- [x] Editing a value's first stat can reorder rows and change finder
+      lower-than results; this is documented in CLAUDE.md.
+
+### API
+
+- [x] `GET /api/state` adds the sorted `engraving` block with slot
+      definitions, categories, grades, four value tables, all slots, and
+      per-character empty counts.
+- [x] Value CRUD with category/grade immutability, paired-stat validation,
+      duplicate `409 DUPLICATE_ENGRAVING_VALUE`, and usage endpoint.
+- [x] In-use delete returns `409 ENGRAVING_VALUE_IN_USE` with affected
+      character/slot details and a foreign-key fallback.
+- [x] Finder validates slot/value, rejects category mismatches, and returns
+      empty-first then lower-value results.
+- [x] Slot upsert validates character/value refs, slot bounds, category match,
+      and third-stat pairs.
+- [x] Blank or whitespace third-stat name with a value returns
+      `400 VALIDATION_ERROR`; the value is never silently dropped.
+- [x] Repeated slot deletes are idempotent.
+- [x] All SQL is parameterized.
+
+### Import/export
+
+- [x] Export is `version: 3` with four category arrays using explicit ids and
+      `characterEngraving`.
+- [x] Import accepts versions 1, 2, and 3. Version 1/2 clears character
+      engraving but keeps current value tables; version 3 replaces both.
+- [x] Missing category arrays are invalid; empty arrays are valid.
+- [x] v3 validates ids, natural keys, stats, references, slots, category
+      matches, duplicate slots, and third-stat pairs before backup or change.
+- [x] Invalid imports change nothing and create no preimport backup.
+- [x] Import counts include `engravingValues` and `engravingSlots`; v1/v2
+      report zero.
+
+### Frontend
+
+- [x] Engraving tab sits after Heraldry in the exact tab order.
+- [x] Two-row sticky grid header, sticky first column, category groups, slot
+      filter showing one column, grade badge, compact stats, and third-stat
+      dot with title/aria-label.
+- [x] Finder selects slot, grade, and value; results are informational only.
+- [x] Successful slot save or clear re-runs the finder for the current
+      selection.
+- [x] Search filters characters; the slot filter is a view choice and is
+      included in filter-active state.
+- [x] Clear filters resets both search and slot filter. `Showing X of Y` is
+      based on the search only.
+- [x] Editor validates third-stat pairs inline, including blank name + value,
+      and keeps the value visible instead of dropping it.
+- [x] Manage has four category sub-tabs, 34 rows per tab, add/edit/delete,
+      grade/category frozen on edit, and the singular/plural in-use edit note.
+- [x] In-use delete shows the blocking character/slot list before confirmation.
+- [x] Dashboard engraving list is outside the all-runs-done branch, sorts by
+      empty count then name, shows three slot names + `+N`, caps at 10, and
+      keeps the v2 empty state.
+- [x] Dashboard row click prefills only Engraving; the Heraldry row prefills
+      only Heraldry. Navigation tests cover both directions.
+- [x] Backup export/import copy and success counts cover engraving and
+      version-specific clearing.
+
+## 3. Deviations from the plan
+
+1. `v3.2` already existed and was the current branch at the same commit as
+   `main` when implementation began, so no new branch was created.
+2. `Project_Context_v1.md` was not updated. It explicitly describes the v1
+   scope and status and is a historical document, so it was not treated as
+   maintained v3.2 documentation.
+3. Two small pure helpers were added beyond the named plan helpers:
+   `formatPercentInput` (for editable percent inputs) and `parseTabFromHash`
+   (so hash parsing is testable without a DOM). Neither changes behavior.
+4. The in-use blocking dialog reuses `ConfirmDialog` with a `Close` action
+   instead of introducing a separate dialog component. The blocking list still
+   appears before any delete confirmation.
+5. The migration test was extended with engraving CHECK/UNIQUE/RESTRICT/CASCADE
+   cases and an explicit v2-to-v3 preservation case, beyond the minimum wording
+   in the test list.
+6. Browser manual acceptance was not performed in this environment; the
+   checklist in section 6 remains for the final visual pass.
+
+No business rule from the approved plan was changed.
+
+## 4. Files
+
+Created:
+
+| File | Purpose |
+| --- | --- |
+| `server/src/engraving.ts` | Pure slots, grades, ordering, lower-than, state, and finder logic. |
+| `server/src/engravingSeed.ts` | Frozen 136-row seed with shape assertions. |
+| `server/src/engravingData.ts` | DB reads for values, rows, single values, and state. |
+| `server/src/routes/engraving.ts` | Values, usage, finder, and character slots API. |
+| `server/tests/engraving.test.ts` | Domain rules, expansion, defensive cases, finder ordering. |
+| `server/tests/engraving-api.test.ts` | Full API validation, usage, finder, cascade, FK fallback. |
+| `web/src/lib/engraving.ts` | Percent helpers, filtering, slot visibility, Dashboard list. |
+| `web/src/lib/engraving.test.ts` | All specified percent cases plus filters and list behavior. |
+| `web/src/pages/EngravingPage.tsx` | Finder, filters, grid, editor, and mutation wiring. |
+| `web/src/components/EngravingFinder.tsx` | Controlled slot/grade/value finder and results. |
+| `web/src/components/EngravingGrid.tsx` | Two-row sticky grid with slot filtering. |
+| `web/src/components/EngravingSlotEditor.tsx` | Slot editor with inline third-stat validation. |
+| `web/src/components/EngravingGradeBadge.tsx` | Icon + text grade badge. |
+| `web/src/components/EngravingValuesSection.tsx` | Category tabs, value CRUD, usage notes and blocks. |
+
+Modified:
+
+| File | Change |
+| --- | --- |
+| `server/src/migrations.ts` | Migration 3, tables, index, and seed call. |
+| `server/src/app.ts` | Mounts `/api/engraving`. |
+| `server/src/routes/state.ts` | Adds the engraving state block. |
+| `server/src/transfer.ts` | Export v3, import v1/v2/v3, engraving validation and replacement. |
+| `server/src/validation.ts` | Engraving slot, category, and grade parsers. |
+| `server/tests/migrations.test.ts` | v2 upgrade, full 136-row seed, constraint tests. |
+| `server/tests/import.test.ts` | v3 round-trip, empty/missing arrays, v1/v2 clearing, invalid matrix. |
+| `server/tests/api.test.ts` | Engraving slot-count state assertion. |
+| `web/src/api/types.ts` | Engraving types, AppState block, import counts. |
+| `web/src/api/client.ts` | Engraving API methods and error details. |
+| `web/src/lib/navigation.ts` | Engraving tab, tab-scoped prefill helpers. |
+| `web/src/lib/navigation.test.ts` | Tab order, hash parsing, prefill isolation. |
+| `web/src/App.tsx` | Engraving route and tab-scoped prefill. |
+| `web/src/pages/DashboardPage.tsx` | Engraving empty-slot list and row prefill. |
+| `web/src/pages/ManagePage.tsx` | Engraving value tables and delete warning. |
+| `web/src/pages/BackupPage.tsx` | Version-aware copy, counts, and descriptions. |
+| `CLAUDE.md`, `README.md` | Engraving rules, tables, migration, and export/import v3. |
+
+No changes were made to migrations 1 and 2, `server/src/seed-dev.ts`, or
+existing run/week/Heraldry/backup business rules.
+
+## 5. Test results
+
+Commands run:
+
+```text
+npm test
+npm run lint
+npm run build
+```
+
+Results:
+
+- `npm test`: **203 passed** across **17 test files**.
+- `npm run lint`: passed with no errors or warnings.
+- `npm run build`: passed server typecheck, dev typecheck, web typecheck, and
+  the Vite production build.
+
+New coverage includes:
+
+- All 136 seeded rows compared against the expected series, plus pair
+  examples and v2-to-v3 preservation.
+- Engraving CHECK, UNIQUE, RESTRICT, and CASCADE behavior.
+- Every specified `parsePercentInput` case, including `0.29`, `0.57`, `1.15`,
+  `.5`, trimmed spaces, and rejected comma/trailing-dot/exponent/sign/
+  three-decimal/empty/non-numeric inputs.
+- Domain ordering, lower-than semantics, state expansion, empty counts,
+  defensive missing values, and finder empty-first/name tie-breaks.
+- API value CRUD, duplicates, immutability, usage, in-use blocking, FK
+  fallback, finder validation, slot validation, blank-name-with-value 400,
+  idempotent delete, cascade, and value edits reflected in slots.
+- v3 round-trip, empty category arrays, missing arrays, v1/v2 clearing,
+  replacement counts, and the full invalid-v3 matrix.
+- Navigation tab order, Engraving hash parsing, and Heraldry/Engraving
+  prefill isolation.
+
+## 6. Manual acceptance checklist
+
+Automated tests cannot exercise the visual layout or real browser history
+events. The following browser checks remain:
+
+1. Engraving grid: sticky two-row header and first column, horizontal scroll,
+   category group headers, single-column slot filter, grade badge plus compact
+   stats, and third-stat dot tooltip.
+2. Finder: empty slots first, lower values next, equal/higher excluded; save
+   and clear a slot and confirm the finder refreshes without reselecting.
+3. Editor: grade buttons, filtered values, paired second stat, third-stat
+   checkbox, blank-name-with-value inline error, save, and clear.
+4. Dashboard: empty-slot sorting, three names + `+N`, top 10, View all, row
+   click prefill, and the all-filled message. Confirm the list stays visible
+   when every run is done.
+5. Manage: four category tabs, 34 rows each, add/edit/delete, duplicate error,
+   in-use edit note singular/plural, and the blocking delete list.
+6. Backup: export v3, v3 round-trip, v2 import clears engraving but keeps the
+   value tables, v1 import also clears heraldry, and an invalid import leaves
+   the database unchanged with no preimport backup.
+7. Dark/light mode and large tap targets.
+
+## 7. Open questions
+
+None. The approved plan covered the behavior implemented here.

@@ -88,6 +88,99 @@ export interface HeraldryAffectedSlot {
   slot: number;
 }
 
+export type EngravingCategory = 'weapon' | 'armor' | 'accessory' | 'wtd';
+export type EngravingGrade = 'rare' | 'epic' | 'unique' | 'legend';
+
+export interface EngravingSlotDefinition {
+  slot: number;
+  label: string;
+  category: EngravingCategory;
+}
+
+export interface EngravingCategoryMeta {
+  key: EngravingCategory;
+  label: string;
+  firstStatLabel: string;
+  secondStatLabel: string | null;
+}
+
+export interface EngravingGradeMeta {
+  key: EngravingGrade;
+  label: string;
+  rank: number;
+}
+
+export interface EngravingValue {
+  id: number;
+  category: EngravingCategory;
+  grade: EngravingGrade;
+  /** Integer hundredths of a percent: 28 = 0.28%. */
+  firstStatValue: number;
+  secondStatValue: number | null;
+}
+
+export interface EngravingSlot {
+  characterId: number;
+  slot: number;
+  category: EngravingCategory;
+  label: string;
+  isEmpty: boolean;
+  valueId: number | null;
+  grade: EngravingGrade | null;
+  firstStatValue: number | null;
+  secondStatValue: number | null;
+  thirdStatName: string | null;
+  thirdStatValue: number | null;
+}
+
+export interface EngravingEmptySlot {
+  slot: number;
+  label: string;
+}
+
+export interface EngravingCharacterSummary {
+  characterId: number;
+  name: string;
+  emptyCount: number;
+  filledCount: number;
+  emptySlots: EngravingEmptySlot[];
+}
+
+export type EngravingValueTables = Record<EngravingCategory, EngravingValue[]>;
+
+export interface EngravingState {
+  slotCount: number;
+  slotDefinitions: EngravingSlotDefinition[];
+  categories: EngravingCategoryMeta[];
+  grades: EngravingGradeMeta[];
+  valueTables: EngravingValueTables;
+  slots: EngravingSlot[];
+  perCharacter: EngravingCharacterSummary[];
+}
+
+export interface EngravingFinderResult {
+  characterId: number;
+  name: string;
+  isEmpty: boolean;
+  valueId: number | null;
+  grade: EngravingGrade | null;
+  firstStatValue: number | null;
+  secondStatValue: number | null;
+}
+
+export interface EngravingValueUsageResponse {
+  valueId: number;
+  affectedCount: number;
+  affectedEngravingSlots: EngravingAffectedSlot[];
+}
+
+export interface EngravingAffectedSlot {
+  characterId: number;
+  characterName: string;
+  slot: number;
+  slotLabel: string;
+}
+
 export interface AppState {
   weekKey: string;
   weekStartAt: string;
@@ -98,6 +191,7 @@ export interface AppState {
   runs: Run[];
   dashboard: Dashboard;
   heraldry: HeraldryState;
+  engraving: EngravingState;
 }
 
 export type BackupKind = 'app' | 'preimport';
@@ -117,6 +211,8 @@ export interface ImportResult {
     plateLevels: number;
     plates: number;
     heraldrySlots: number;
+    engravingValues: number;
+    engravingSlots: number;
   };
   backup: string;
 }

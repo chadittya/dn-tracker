@@ -1,8 +1,8 @@
 # Dragon Nest Run Tracker
 
 Local-only web app for tracking which characters have run which nests this week,
-plus each character's persistent heraldry loadout. Single user, no login. Runs
-at <http://localhost:3000> and binds to `127.0.0.1` only.
+plus each character's persistent heraldry and engraving loadouts. Single user,
+no login. Runs at <http://localhost:3000> and binds to `127.0.0.1` only.
 
 Weekly reset happens every Saturday 08:00 WIB (UTC+7). The reset is
 non-destructive: past runs stay in the database, and a run counts as done only
@@ -68,9 +68,13 @@ the database lives in `data/`.
 - Timestamps in backup filenames are WIB.
 - The Backup page lists both kinds and can export or import all data as JSON.
   Importing replaces all current data after confirmation, including plate
-  levels, plates, and heraldry slots.
-- Export files use `version: 2` and include heraldry. Import accepts version 1
-  and version 2; importing an older version 1 file clears current heraldry.
+  levels, plates, heraldry slots, engraving values, and character engraving.
+- Export files use `version: 3` and include heraldry and engraving. Import
+  accepts versions 1, 2, and 3. Version 1 and 2 files clear current character
+  engraving but keep the current engraving value tables; a version 1 file also
+  clears current heraldry.
+- Schema version 3 means older v3.1 builds refuse to open the database. Restore
+  a pre-upgrade backup before running an older build.
 
 `data/` and `data-dev/` are gitignored. Do not commit or edit these files
 manually.
@@ -119,3 +123,23 @@ For development data, repeat the same steps using `data-dev/` and
   their heraldry.
 - Copying heraldry replaces all slots on the target character with the source
   character's slots.
+
+## Engraving rules
+
+- Every character has 14 fixed engraving slots: Main weapon, Secondary weapon,
+  Head, Upper, Lower, Gloves, Boots, Necklace, Earring, Ring 1, Ring 2, Wings,
+  Tail, and Decal.
+- Slots use four value tables: Weapon (slots 1-2), Armor (3-7), Accessory
+  (8-11), and W/T/D (12-14). A filled slot stores a grade, the value's stats,
+  and an optional free-text third stat with its own value.
+- Grades are Rare, Epic, Unique, and Legend. Percent rates are stored as
+  hundredths, so `0.28%` is `28`, and the UI accepts up to two decimals.
+- Engraving persists across weekly resets.
+- Find a slot to upgrade by choosing a slot, grade, and value. The finder lists
+  characters with an empty slot or a lower value; equal or higher values are
+  excluded.
+- Add, edit, and delete engraving values on the Manage page, grouped into the
+  four category tabs. Deleting a value in use is blocked.
+- Editing a value's first stat can change its row order and the finder's
+  lower-than results.
+- The Dashboard lists characters with the most empty engraving slots.
