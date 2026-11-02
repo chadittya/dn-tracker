@@ -1,8 +1,8 @@
 # Dragon Nest Run Tracker
 
 Local-only web app for tracking which characters have run which nests this week,
-plus each character's persistent heraldry and engraving loadouts. Single user,
-no login. Runs at <http://localhost:3000> and binds to `127.0.0.1` only.
+plus each character's persistent heraldry, engraving and card collection. Single
+user, no login. Runs at <http://localhost:3000> and binds to `127.0.0.1` only.
 
 Weekly reset happens every Saturday 08:00 WIB (UTC+7). The reset is
 non-destructive: past runs stay in the database, and a run counts as done only
@@ -43,17 +43,19 @@ npm start
 ```
 
 Open <http://localhost:3000>. The built frontend is served from `dist/web`, and
-the database lives in `data/`.
+the database lives in `data/`. After any code change, run `npm run build` again
+before using `start.bat`.
 
 ## Commands
 
-| Command | What it does |
-| --- | --- |
-| `npm run dev` | API + frontend dev server on port 3000, data in `data-dev/` |
-| `npm run build` | Typecheck server and web, build frontend into `dist/` |
-| `npm start` | Serve the built app and API on port 3000, data in `data/` |
-| `npm test` | Run unit and integration tests with Vitest |
-| `npm run lint` | Run ESLint |
+| Command            | What it does                                                                                  |
+| ------------------ | --------------------------------------------------------------------------------------------- |
+| `npm run dev`      | API + frontend dev server on port 3000, data in `data-dev/`                                   |
+| `npm run build`    | Typecheck server and web, build frontend into `dist/`                                         |
+| `npm start`        | Serve the built app and API on port 3000, data in `data/`                                     |
+| `npm test`         | Run unit and integration tests with Vitest                                                    |
+| `npm run lint`     | Run ESLint                                                                                    |
+| `npm run seed:dev` | Fill `data-dev/` with sample characters, nests and runs (no heraldry, engraving or card data) |
 
 ## Data and backups
 
@@ -68,13 +70,19 @@ the database lives in `data/`.
 - Timestamps in backup filenames are WIB.
 - The Backup page lists both kinds and can export or import all data as JSON.
   Importing replaces all current data after confirmation, including plate
-  levels, plates, heraldry slots, engraving values, and character engraving.
-- Export files use `version: 3` and include heraldry and engraving. Import
-  accepts versions 1, 2, and 3. Version 1 and 2 files clear current character
-  engraving but keep the current engraving value tables; a version 1 file also
-  clears current heraldry.
-- Schema version 3 means older v3.1 builds refuse to open the database. Restore
-  a pre-upgrade backup before running an older build.
+  levels, plates, heraldry slots, engraving values, character engraving, the
+  card list, and character cards.
+- Export files use `version: 4` and include heraldry, engraving and cards.
+  Import accepts versions 1 to 4.
+  - Version 1 files clear current heraldry.
+  - Version 1 and 2 files clear current character engraving but keep the
+    current engraving value tables.
+  - Version 1, 2 and 3 files have no card data: they clear every character's
+    cards but keep the current card list.
+  - Version 4 files replace everything, including the card list.
+- Schema version 4 means v3.2 and older builds refuse to open the database.
+  Copy the whole `data/` folder before the first start after an upgrade, and
+  restore it before running an older build.
 
 `data/` and `data-dev/` are gitignored. Do not commit or edit these files
 manually.
@@ -112,10 +120,10 @@ For development data, repeat the same steps using `data-dev/` and
 - Status is computed by the server from the level rank (highest level = rank 0,
   next = rank 1, lower = rank 2+), rarity, and third stat:
 
-  | Rarity | Rank 0 | Rank 1 | Rank 2+ |
-  | --- | --- | --- | --- |
-  | Epic | OK | OK with third stat, otherwise Recommended | Needs upgrade |
-  | Rare | Recommended with third stat, otherwise Needs upgrade | Needs upgrade | Needs upgrade |
+  | Rarity | Rank 0                                               | Rank 1                                    | Rank 2+       |
+  | ------ | ---------------------------------------------------- | ----------------------------------------- | ------------- |
+  | Epic   | OK                                                   | OK with third stat, otherwise Recommended | Needs upgrade |
+  | Rare   | Recommended with third stat, otherwise Needs upgrade | Needs upgrade                             | Needs upgrade |
 
 - An empty slot counts as Needs upgrade.
 - Deleting a used level is blocked. Deleting an unused level recalculates all
@@ -143,3 +151,28 @@ For development data, repeat the same steps using `data-dev/` and
 - Editing a value's first stat can change its row order and the finder's
   lower-than results.
 - The Dashboard lists characters with the most empty engraving slots.
+- Deleting a character deletes their engraving.
+
+## Card rules
+
+- The card list is maintained on the Manage page: add a card, rename it, delete
+  it, or bulk import names. Each character can have each card at one of five
+  grades: Magic, Rare, Epic, Unique, Legend (lowest to highest). Only the card
+  name and grade are tracked, not card stats.
+- Cards persist across weekly resets.
+- The Cards tab has a finder on top: choose a card (type to search) and a target
+  grade. It lists characters who do not have the card or have it below that
+  grade; equal or higher grades are excluded. Results are informational only.
+- Below the finder is the character list with a card count per character. Click
+  a character to open their card panel, where you can add a card, change its
+  grade (up or down), or remove it. Removing a card is immediate.
+- Bulk import: paste card names, one per line. Names that already exist or are
+  repeated in the paste are skipped, empty lines are ignored, and names over 50
+  characters are reported as invalid. Valid names are always added, and the
+  result is a short summary.
+- The Manage card list is sorted A to Z, 10 per page, with search over all cards.
+  Other Manage lists keep newest first.
+- Deleting a card removes it from every character who has it; the confirmation
+  shows how many characters are affected. Renaming a card keeps every
+  character's grade. Deleting a character deletes their cards.
+- The Dashboard does not list cards.
