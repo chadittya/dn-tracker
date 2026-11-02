@@ -3,6 +3,7 @@ export type Tab =
   | 'matrix'
   | 'heraldry'
   | 'engraving'
+  | 'cards'
   | 'dashboard'
   | 'backup'
   | 'manage';
@@ -23,6 +24,7 @@ export const TABS: ReadonlyArray<{ id: Tab; label: string }> = [
   { id: 'matrix', label: 'Matrix' },
   { id: 'heraldry', label: 'Heraldry' },
   { id: 'engraving', label: 'Engraving' },
+  { id: 'cards', label: 'Cards' },
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'backup', label: 'Backup' },
   { id: 'manage', label: 'Manage' },

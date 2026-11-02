@@ -4,6 +4,7 @@ import { buildDashboard } from '../progress';
 import type { CharacterRow, NestRow, RunRow } from '../progress';
 import { readHeraldryState } from '../heraldryData';
 import { readEngravingState } from '../engravingData';
+import { readCardsState } from '../cardsData';
 import { getWeekInfo } from '../week';
 
 export function createStateRouter(
@@ -52,6 +53,7 @@ export function createStateRouter(
       dashboard: buildDashboard(characters, nests, runs),
       heraldry: readHeraldryState(db, characters),
       engraving: readEngravingState(db, characters),
+      cards: readCardsState(db, characters),
     });
   });
 

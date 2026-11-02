@@ -24,16 +24,19 @@ function importConfirmMessage(
   const replaced =
     'every current character, nest, run, plate level, plate, and heraldry slot';
 
+  if (version === 4) {
+    return `Importing "${fileName}" will delete ${replaced}, every engraving value, every character engraving slot, the card list, and every character card, then replace them with the file's contents. A pre-import backup is created first.`;
+  }
   if (version === 3) {
-    return `Importing "${fileName}" will delete ${replaced}, every engraving value, and every character engraving slot, then replace them with the file's contents. A pre-import backup is created first.`;
+    return `Importing "${fileName}" will delete ${replaced}, every engraving value, and every character engraving slot, then replace them with the file's contents. Version 3 files have no card data, so the current card list is kept and every character's cards are cleared. A pre-import backup is created first.`;
   }
   if (version === 1) {
-    return `Importing "${fileName}" will delete ${replaced} plus every character engraving slot, then replace them with the file's contents. Version 1 files have no heraldry or engraving data, so current heraldry is cleared; current engraving value tables are kept. A pre-import backup is created first.`;
+    return `Importing "${fileName}" will delete ${replaced} plus every character engraving slot, then replace them with the file's contents. Version 1 files have no heraldry or engraving data, so current heraldry is cleared; current engraving value tables are kept. Version 1 files also have no card data, so the current card list is kept and every character's cards are cleared. A pre-import backup is created first.`;
   }
   if (version === 2) {
-    return `Importing "${fileName}" will delete ${replaced} plus every character engraving slot, then replace them with the file's contents. Version 2 files have no engraving data, so current character engraving is cleared; current engraving value tables are kept. A pre-import backup is created first.`;
+    return `Importing "${fileName}" will delete ${replaced} plus every character engraving slot, then replace them with the file's contents. Version 2 files have no engraving data, so current character engraving is cleared; current engraving value tables are kept. Version 2 files also have no card data, so the current card list is kept and every character's cards are cleared. A pre-import backup is created first.`;
   }
-  return `Importing "${fileName}" will replace ${replaced}. Older files without heraldry or engraving data clear character engraving and may clear heraldry. A pre-import backup is created first.`;
+  return `Importing "${fileName}" will replace ${replaced}. Older files without heraldry or engraving data clear character engraving and may clear heraldry; files without card data keep the current card list and clear every character's cards. A pre-import backup is created first.`;
 }
 
 export function BackupPage() {
@@ -132,9 +135,11 @@ export function BackupPage() {
           result.imported.heraldrySlots
         } heraldry slots, ${
           result.imported.engravingValues
-        } engraving values, and ${
-          result.imported.engravingSlots
-        } engraving slots. Pre-import backup: ${result.backup}.`,
+        } engraving values, ${result.imported.engravingSlots} engraving slots, ${
+          result.imported.cards
+        } cards, and ${
+          result.imported.cardSlots
+        } character cards. Pre-import backup: ${result.backup}.`,
       );
       await Promise.all([refresh(), loadBackups()]);
     } catch (caught) {
@@ -160,8 +165,8 @@ export function BackupPage() {
           <h2 className="section-title">Export data</h2>
           <p className="muted mt-1">
             Download every character, nest, run, plate level, plate, heraldry
-            slot, engraving value, and character engraving slot from all weeks
-            as a JSON file.
+            slot, engraving value, character engraving slot, card, and
+            character card from all weeks as a JSON file.
           </p>
           <button
             type="button"
@@ -182,11 +187,13 @@ export function BackupPage() {
           <h2 className="section-title">Import data</h2>
           <p className="muted mt-1">
             Replaces all current characters, nests, runs, plate levels, plates,
-            heraldry slots, engraving values, and character engraving slots.
-            The file is fully validated first, and a pre-import backup is
-            created. Version 3 files replace everything; version 1 and 2 files
-            clear character engraving but keep current engraving value tables.
-            Version 1 files also clear heraldry.
+            heraldry slots, engraving values, character engraving slots, cards,
+            and character cards. The file is fully validated first, and a
+            pre-import backup is created. Version 4 files replace everything;
+            version 1 to 3 files keep the current card list and clear every
+            character's cards. Version 1 and 2 files clear character engraving
+            but keep current engraving value tables. Version 1 files also clear
+            heraldry.
           </p>
           <input
             ref={fileInputRef}

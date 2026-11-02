@@ -1,7 +1,13 @@
 import type {
   AppState,
   BackupInfo,
+  CardBulkImportResult,
+  CardCatalogEntry,
+  CardFinderResult,
+  CardGrade,
+  CardUsageResponse,
   Character,
+  CharacterCardEntry,
   EngravingAffectedSlot,
   EngravingCategory,
   EngravingFinderResult,
@@ -241,6 +247,56 @@ export const api = {
 
   clearEngravingSlot: (characterId: number, slot: number) =>
     request<void>(`/api/engraving/slots/${characterId}/${slot}`, {
+      method: 'DELETE',
+    }),
+
+  createCard: (name: string) =>
+    request<{ card: CardCatalogEntry }>('/api/cards', {
+      method: 'POST',
+      body: jsonBody({ name }),
+    }),
+
+  renameCard: (id: number, name: string) =>
+    request<{ card: CardCatalogEntry }>(`/api/cards/${id}`, {
+      method: 'PATCH',
+      body: jsonBody({ name }),
+    }),
+
+  deleteCard: (id: number) =>
+    request<void>(`/api/cards/${id}`, { method: 'DELETE' }),
+
+  getCardUsage: (id: number) =>
+    request<CardUsageResponse>(`/api/cards/${id}/usage`),
+
+  importCards: (text: string) =>
+    request<CardBulkImportResult>('/api/cards/import', {
+      method: 'POST',
+      body: jsonBody({ text }),
+    }),
+
+  getCardFinder: (cardId: number, grade: CardGrade) =>
+    request<{
+      card: CardCatalogEntry;
+      targetGrade: CardGrade;
+      results: CardFinderResult[];
+    }>(
+      `/api/cards/finder?cardId=${encodeURIComponent(
+        String(cardId),
+      )}&grade=${encodeURIComponent(grade)}`,
+    ),
+
+  setCharacterCard: (input: {
+    characterId: number;
+    cardId: number;
+    grade: CardGrade;
+  }) =>
+    request<{ entry: CharacterCardEntry }>('/api/character-cards', {
+      method: 'PUT',
+      body: jsonBody(input),
+    }),
+
+  removeCharacterCard: (characterId: number, cardId: number) =>
+    request<void>(`/api/character-cards/${characterId}/${cardId}`, {
       method: 'DELETE',
     }),
 

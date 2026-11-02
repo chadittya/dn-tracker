@@ -23,7 +23,7 @@ Local-only web app to track which characters have run which nests this week, plu
 - `npm start` serve API + built web on http://localhost:3000
 - `npm test` run all unit/integration tests
 - `npm run lint`
-- `npm run seed:dev` fill `data-dev/` only with sample characters, nests and runs (no heraldry, engraving or card data; hard-guarded against touching `data/`)
+- `npm run seed:dev` fill `data-dev/` only with sample characters, nests and runs. The seed script itself creates no heraldry, engraving or card data; existing catalogs (plate levels, plates, engraving values, cards) are left in place, while per-character heraldry, engraving and card rows are removed with the old characters through FK cascades. Hard-guarded against touching `data/`.
 
 ## Business rules (do not change without asking)
 
@@ -51,7 +51,7 @@ Local-only web app to track which characters have run which nests this week, plu
 - Pipeline: sort -> search over ALL records -> paginate. Page state is per list, not persisted, and resets on tab switch.
 - Page resets to 1 on search change and after a successful add (including plate level add and card bulk import). Delete and rename keep the page, clamped.
 - The pagination footer shows only when the filtered count is above 10. The Manage filter note reads "Filtered to X of N ...".
-- This ordering and pagination apply to the Manage lists only. Server response order and the other tabs are unchanged.
+- This ordering and pagination apply to the Manage lists only. The existing API block orders and the other tabs are unchanged; the cards block is A to Z as described in Cards.
 
 ### Heraldry (v3.1)
 
@@ -99,19 +99,23 @@ Local-only web app to track which characters have run which nests this week, plu
 
 ### Dashboard lists (v2, v3.1, v3.2)
 
+- Most remaining: characters with remaining runs, sorted by most remaining then name; top 10, "+N more", "View all" (switches to Matrix).
+- Nests needing runs: unfinished nests, sorted by most remaining then name; top 5, "+N more", "View all" (switches to Runs).
+- When every run is done, both run lists are replaced by "All done this week".
 - Heraldry to upgrade: each character once with the most urgent status; sort Needs first, then more Needs slots, more Recommended slots, then name; top 10, "+N more", "View all".
 - Engraving empty slots: each character once with the empty count and up to 3 empty slot names plus "+N"; sort most empty then name; top 10, "+N more", "View all" (switches tab only).
-- Both lists are shown outside the all-runs-done branch. A character with no data counts as fully empty until data is entered (accepted).
+- Heraldry and engraving lists are shown outside the all-runs-done branch. A character with no data counts as fully empty until data is entered (accepted).
 
 ## Export and import
 
 - Export JSON is `version: 4`. Import accepts versions 1 to 4. All validation happens before the preimport backup and before applying; an invalid import changes nothing and creates no backup.
 - Version 2 added `plateLevels`, `plates`, `characterHeraldry`.
 - Version 3 added `engravingValues` (object with arrays `weapon`, `armor`, `accessory`, `wtd`; rows with explicit ids, grade, firstStatValue, secondStatValue) and `characterEngraving` (characterId, slot, valueId, thirdStatName, thirdStatValue). Empty category arrays are valid, missing arrays are invalid.
-- Version 4 adds the card catalog (`cards`: id and name) and each character's cards with grades (`characterCards`: characterId, cardId, grade). Exact field names are fixed in the v3.3 plan and then recorded here.
-- A version 4 file replaces the card catalog and all character cards.
+- Version 4 adds the card catalog (`cards`: `id`, `name`, `createdAt`) and each character's cards with grades (`characterCards`: `characterId`, `cardId`, `grade`). Both arrays are required and must exist; an empty array is valid.
+- A version 4 file replaces plate levels, plates, character heraldry, engraving values, character engraving, the card catalog and all character cards.
+- Version 1 clears heraldry (plate levels, plates and slots); versions 2, 3 and 4 replace heraldry with the file's heraldry.
+- Versions 1 and 2 clear all character engraving but keep the current engraving value tables; versions 3 and 4 replace both engraving values and character engraving from the file.
 - Versions 1, 2 and 3 have no card data: importing one KEEPS the current card catalog and CLEARS every character's cards. The confirmation dialog says so.
-- Older-version behavior for earlier data is unchanged: version 1 clears heraldry; versions 1 and 2 clear all character engraving but keep the current engraving value tables.
 - Import result counts include `engravingValues`, `engravingSlots`, `cards` and `cardSlots` (older versions report 0 for data they do not contain).
 
 ## Database rules
@@ -123,7 +127,7 @@ Local-only web app to track which characters have run which nests this week, plu
 - character_heraldry has `CHECK (slot >= 1)`; the upper bound is enforced by routes, validation and import, not DDL.
 - engraving_values: id, category (weapon/armor/accessory/wtd), grade (rare/epic/unique/legend), first_stat_value > 0, second_stat_value (NULL for weapon/armor, > 0 for accessory/wtd), UNIQUE (category, grade, first_stat_value).
 - character_engraving: (character_id, slot, value_id, third_stat_name, third_stat_value), PRIMARY KEY (character_id, slot), `CHECK (slot >= 1)`, third stat both NULL or name length 1 to 50 (trimmed) and value > 0. `value_id` references engraving_values(id) ON DELETE RESTRICT. Index `idx_character_engraving_value_id`.
-- cards (migration 4): `id`, `name COLLATE NOCASE UNIQUE`, `created_at`.
+- cards (migration 4): `id`, `name COLLATE NOCASE UNIQUE`, `created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))` (same format as the other tables).
 - character_cards (migration 4): `character_id` FK ON DELETE CASCADE, `card_id` FK ON DELETE CASCADE, `grade` CHECK in (magic, rare, epic, unique, legend), PRIMARY KEY (character_id, card_id), index on `card_id`.
 - `PRAGMA foreign_keys = ON`, WAL mode. Character, plate and card references use `ON DELETE CASCADE`; `character_heraldry.level` and `character_engraving.value_id` use `ON DELETE RESTRICT`.
 - Names use `COLLATE NOCASE` with a UNIQUE constraint.
@@ -135,9 +139,9 @@ Local-only web app to track which characters have run which nests this week, plu
 
 - State: `GET /api/state` (week info, characters, nests, runs, dashboard, heraldry block, engraving block, cards block). Health: `GET /api/health`.
 - Core: `POST/PATCH/DELETE /api/characters[/:id]`, `POST/PATCH/DELETE /api/nests[/:id]`, `PUT /api/runs`.
-- Heraldry: `/api/heraldry/levels`, `/api/heraldry/plates`, `PUT /api/heraldry/slots`, `DELETE /api/heraldry/slots/:characterId/:slot`, `POST /api/heraldry/copy`.
+- Heraldry: `POST/DELETE /api/heraldry/levels[/:value]`, `POST/PATCH/DELETE /api/heraldry/plates[/:id]`, `PUT /api/heraldry/slots`, `DELETE /api/heraldry/slots/:characterId/:slot`, `POST /api/heraldry/copy`.
 - Engraving: `/api/engraving/values` (POST, PATCH/:id, DELETE/:id, GET/:id/usage), `GET /api/engraving/finder?slot=&valueId=`, `PUT /api/engraving/slots`, `DELETE /api/engraving/slots/:characterId/:slot`.
-- Cards: `POST/PATCH/DELETE /api/cards[/:id]`, `GET /api/cards/:id/usage`, `POST /api/cards/import`, `GET /api/cards/finder?cardId=&grade=`, `PUT /api/character-cards`, `DELETE /api/character-cards/:characterId/:cardId` (idempotent).
+- Cards: `POST/PATCH/DELETE /api/cards[/:id]`, `GET /api/cards/:id/usage`, `POST /api/cards/import` (body `{ text }`, one name per line, default 100 KB body limit), `GET /api/cards/finder?cardId=&grade=`, `PUT /api/character-cards`, `DELETE /api/character-cards/:characterId/:cardId` (idempotent; 404 only for an unknown character).
 - Backups and data: `GET /api/backups`, `GET /api/data/export`, `POST /api/data/import`.
 - Errors use `{ error: { code, message } }` with optional `details`. Unknown `/api/*` returns a JSON 404.
 

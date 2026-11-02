@@ -1,4 +1,4 @@
-import type { EngravingGrade } from '../api/types';
+import type { CardGrade, EngravingGrade } from '../api/types';
 
 export interface EngravingGradeColor {
   label: string;
@@ -59,4 +59,26 @@ export const ENGRAVING_GRADE_COLORS: Record<
     buttonSelectedClassName:
       'border border-red-500 bg-red-200 text-red-950 ring-2 ring-red-500 ring-offset-2 dark:border-red-400 dark:bg-red-900 dark:text-red-50 dark:ring-red-400 dark:ring-offset-slate-900',
   },
+};
+
+/**
+ * Card grades reuse the engraving colors for Rare through Legend. Magic gets
+ * its own green definition. Contrast: light badge 6.45:1, dark badge 12.32:1,
+ * selected light 12.32:1, selected dark 8.67:1.
+ */
+export const CARD_GRADE_COLORS: Record<CardGrade, EngravingGradeColor> = {
+  magic: {
+    label: 'Magic',
+    icon: '○',
+    badgeClassName:
+      'bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-200',
+    buttonClassName:
+      'border border-green-300 bg-green-50 text-green-800 hover:bg-green-100 dark:border-green-800 dark:bg-green-950/50 dark:text-green-200 dark:hover:bg-green-950',
+    buttonSelectedClassName:
+      'border border-green-500 bg-green-200 text-green-950 ring-2 ring-green-500 ring-offset-2 dark:border-green-400 dark:bg-green-900 dark:text-green-50 dark:ring-green-400 dark:ring-offset-slate-900',
+  },
+  rare: ENGRAVING_GRADE_COLORS.rare,
+  epic: ENGRAVING_GRADE_COLORS.epic,
+  unique: ENGRAVING_GRADE_COLORS.unique,
+  legend: ENGRAVING_GRADE_COLORS.legend,
 };

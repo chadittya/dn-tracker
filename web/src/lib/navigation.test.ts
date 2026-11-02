@@ -13,6 +13,7 @@ describe('tabs', () => {
       'matrix',
       'heraldry',
       'engraving',
+      'cards',
       'dashboard',
       'backup',
       'manage',
@@ -22,6 +23,7 @@ describe('tabs', () => {
   it('reads the Engraving hash and falls back to Runs', () => {
     expect(parseTabFromHash('#/engraving')).toBe('engraving');
     expect(parseTabFromHash('#engraving')).toBe('engraving');
+    expect(parseTabFromHash('#/cards')).toBe('cards');
     expect(parseTabFromHash('#/unknown')).toBe('runs');
     expect(parseTabFromHash('')).toBe('runs');
   });

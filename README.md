@@ -10,7 +10,8 @@ when it was recorded for the current week.
 
 ## Requirements
 
-- Node.js 22.12 or newer (tested on Node 24.15)
+- Node.js 22.12 or newer within 22.x, 24.x, or 26+ (tested on Node
+  24.20.0)
 - npm
 
 ## First-time setup
@@ -55,7 +56,7 @@ before using `start.bat`.
 | `npm start`        | Serve the built app and API on port 3000, data in `data/`                                     |
 | `npm test`         | Run unit and integration tests with Vitest                                                    |
 | `npm run lint`     | Run ESLint                                                                                    |
-| `npm run seed:dev` | Fill `data-dev/` with sample characters, nests and runs (no heraldry, engraving or card data) |
+| `npm run seed:dev` | Fill `data-dev/` with sample characters, nests and runs (see the note below) |
 
 ## Data and backups
 
@@ -69,20 +70,29 @@ before using `start.bat`.
   are kept.
 - Timestamps in backup filenames are WIB.
 - The Backup page lists both kinds and can export or import all data as JSON.
-  Importing replaces all current data after confirmation, including plate
-  levels, plates, heraldry slots, engraving values, character engraving, the
-  card list, and character cards.
+  Importing replaces all current data after confirmation. Which records are
+  kept depends on the file version, listed below.
 - Export files use `version: 4` and include heraldry, engraving and cards.
   Import accepts versions 1 to 4.
-  - Version 1 files clear current heraldry.
+  - Version 1 files clear current heraldry (plate levels, plates and slots).
+  - Version 2, 3 and 4 files replace current heraldry with the file's
+    heraldry.
   - Version 1 and 2 files clear current character engraving but keep the
     current engraving value tables.
+  - Version 3 and 4 files replace current engraving value tables and character
+    engraving with the file's data.
   - Version 1, 2 and 3 files have no card data: they clear every character's
     cards but keep the current card list.
-  - Version 4 files replace everything, including the card list.
+  - Version 4 files replace plate levels, plates, heraldry slots, engraving
+    values, character engraving, the card list, and character cards.
 - Schema version 4 means v3.2 and older builds refuse to open the database.
   Copy the whole `data/` folder before the first start after an upgrade, and
   restore it before running an older build.
+
+The `seed:dev` script itself creates no heraldry, engraving or card data. It
+leaves existing catalogs (plate levels, plates, engraving values, cards) in
+place; per-character heraldry, engraving and card rows are removed with the old
+characters through the FK cascades.
 
 `data/` and `data-dev/` are gitignored. Do not commit or edit these files
 manually.
@@ -161,17 +171,21 @@ For development data, repeat the same steps using `data-dev/` and
   name and grade are tracked, not card stats.
 - Cards persist across weekly resets.
 - The Cards tab has a finder on top: choose a card (type to search) and a target
-  grade. It lists characters who do not have the card or have it below that
-  grade; equal or higher grades are excluded. Results are informational only.
+  grade. It lists characters with no card first, then the lowest grade, then by
+  name. Characters at or above the target grade are excluded. Results are
+  informational only.
 - Below the finder is the character list with a card count per character. Click
   a character to open their card panel, where you can add a card, change its
   grade (up or down), or remove it. Removing a card is immediate.
 - Bulk import: paste card names, one per line. Names that already exist or are
   repeated in the paste are skipped, empty lines are ignored, and names over 50
   characters are reported as invalid. Valid names are always added, and the
-  result is a short summary.
+  result is a short summary. If any line is invalid, the pasted text stays in
+  the box so it can be corrected; re-importing is safe because existing names
+  are skipped. The bulk import request is limited to 100 KB.
 - The Manage card list is sorted A to Z, 10 per page, with search over all cards.
-  Other Manage lists keep newest first.
+  Characters, nests and plates keep newest first; plate levels stay highest
+  value first.
 - Deleting a card removes it from every character who has it; the confirmation
   shows how many characters are affected. Renaming a card keeps every
   character's grade. Deleting a character deletes their cards.

@@ -111,6 +111,28 @@ export const migrations: Migration[] = [
       seedEngravingValues(db);
     },
   },
+  {
+    version: 4,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE cards (
+          id          INTEGER PRIMARY KEY,
+          name        TEXT NOT NULL COLLATE NOCASE UNIQUE,
+          created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+        );
+
+        CREATE TABLE character_cards (
+          character_id  INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+          card_id       INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+          grade         TEXT NOT NULL
+                        CHECK (grade IN ('magic', 'rare', 'epic', 'unique', 'legend')),
+          PRIMARY KEY (character_id, card_id)
+        );
+
+        CREATE INDEX idx_character_cards_card_id ON character_cards(card_id);
+      `);
+    },
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = migrations[migrations.length - 1]!.version;

@@ -17,6 +17,61 @@ function setup(): TestContext {
   return context;
 }
 
+function readDatabaseSnapshot(db: Database.Database) {
+  return {
+    characters: db
+      .prepare('SELECT id, name, created_at FROM characters ORDER BY id')
+      .all(),
+    nests: db
+      .prepare('SELECT id, name, created_at FROM nests ORDER BY id')
+      .all(),
+    runs: db
+      .prepare(
+        `SELECT character_id, nest_id, week_key, completed_at
+           FROM runs
+          ORDER BY character_id, nest_id, week_key`,
+      )
+      .all(),
+    plateLevels: db
+      .prepare('SELECT value FROM plate_levels ORDER BY value')
+      .all(),
+    plates: db
+      .prepare('SELECT id, name, created_at FROM plates ORDER BY id')
+      .all(),
+    heraldry: db
+      .prepare(
+        `SELECT character_id, slot, plate_id, level, rarity, has_third_stat
+           FROM character_heraldry
+          ORDER BY character_id, slot`,
+      )
+      .all(),
+    engravingValues: db
+      .prepare(
+        `SELECT id, category, grade, first_stat_value, second_stat_value
+           FROM engraving_values
+          ORDER BY id`,
+      )
+      .all(),
+    engraving: db
+      .prepare(
+        `SELECT character_id, slot, value_id, third_stat_name, third_stat_value
+           FROM character_engraving
+          ORDER BY character_id, slot`,
+      )
+      .all(),
+    cards: db
+      .prepare('SELECT id, name, created_at FROM cards ORDER BY id')
+      .all(),
+    characterCards: db
+      .prepare(
+        `SELECT character_id, card_id, grade
+           FROM character_cards
+          ORDER BY character_id, card_id`,
+      )
+      .all(),
+  };
+}
+
 function validPayload() {
   return {
     version: 1,
@@ -153,6 +208,29 @@ function validV3Payload() {
   };
 }
 
+function validV4Payload() {
+  return {
+    ...validV3Payload(),
+    version: 4,
+    cards: [
+      {
+        id: 50,
+        name: 'Red Dragon',
+        createdAt: '2026-01-05T00:00:00.000Z',
+      },
+      {
+        id: 51,
+        name: 'Blue Dragon',
+        createdAt: '2026-01-06T00:00:00.000Z',
+      },
+    ],
+    characterCards: [
+      { characterId: 10, cardId: 50, grade: 'legend' },
+      { characterId: 10, cardId: 51, grade: 'magic' },
+    ],
+  };
+}
+
 describe('import', () => {
   it('replaces all data and creates a pre-import backup', async () => {
     setup();
@@ -185,6 +263,8 @@ describe('import', () => {
       heraldrySlots: 0,
       engravingValues: 0,
       engravingSlots: 0,
+      cards: 0,
+      cardSlots: 0,
     });
     expect(response.body.backup).toMatch(/^preimport-\d{8}-\d{6}\.db$/);
 
@@ -260,6 +340,8 @@ describe('import', () => {
       heraldrySlots: 0,
       engravingValues: 0,
       engravingSlots: 0,
+      cards: 0,
+      cardSlots: 0,
     });
 
     expect(
@@ -304,13 +386,15 @@ describe('import', () => {
       heraldrySlots: 2,
       engravingValues: 0,
       engravingSlots: 0,
+      cards: 0,
+      cardSlots: 0,
     });
 
     const exported = (
       await request(context.app).get('/api/data/export').expect(200)
     ).body;
     expect(exported).toMatchObject({
-      version: 3,
+      version: 4,
       plateLevels: [30, 27],
       plates: [
         { id: 30, name: 'Bear' },
@@ -417,12 +501,16 @@ describe('import', () => {
       heraldrySlots: 2,
       engravingValues: 4,
       engravingSlots: 4,
+      cards: 0,
+      cardSlots: 0,
     });
 
     const exported = (
       await request(context.app).get('/api/data/export').expect(200)
     ).body;
-    expect(exported.version).toBe(3);
+    expect(exported.version).toBe(4);
+    expect(exported.cards).toEqual([]);
+    expect(exported.characterCards).toEqual([]);
     expect(exported.engravingValues).toEqual({
       weapon: [
         { id: 40, grade: 'rare', firstStatValue: 20, secondStatValue: null },
@@ -462,6 +550,210 @@ describe('import', () => {
         ]),
       },
     ]);
+  });
+
+  it('round-trips a version 4 export with cards', async () => {
+    setup();
+
+    const first = await request(context.app)
+      .post('/api/data/import')
+      .send(validV4Payload())
+      .expect(200);
+
+    expect(first.body.imported).toEqual({
+      characters: 1,
+      nests: 1,
+      runs: 1,
+      plateLevels: 2,
+      plates: 2,
+      heraldrySlots: 2,
+      engravingValues: 4,
+      engravingSlots: 4,
+      cards: 2,
+      cardSlots: 2,
+    });
+
+    const exported = (
+      await request(context.app).get('/api/data/export').expect(200)
+    ).body;
+    expect(exported).toEqual({
+      ...validV4Payload(),
+      exportedAt: expect.any(String),
+    });
+
+    const second = await request(context.app)
+      .post('/api/data/import')
+      .send(exported)
+      .expect(200);
+    expect(second.body.imported).toEqual(first.body.imported);
+
+    const state = (await request(context.app).get('/api/state').expect(200))
+      .body;
+    expect(state.heraldry.levels).toEqual([30, 27]);
+    expect(state.heraldry.cap).toBe(30);
+    expect(state.heraldry.plates.map((plate: { name: string }) => plate.name))
+      .toEqual(['Bear', 'Wolf']);
+
+    const filled = state.heraldry.slots.filter(
+      (slot: { isEmpty: boolean }) => !slot.isEmpty,
+    );
+    expect(
+      filled.map(
+        (slot: {
+          slot: number;
+          plateName: string;
+          level: number;
+          rarity: string;
+          hasThirdStat: boolean;
+          status: string;
+        }) => ({
+          slot: slot.slot,
+          plateName: slot.plateName,
+          level: slot.level,
+          rarity: slot.rarity,
+          hasThirdStat: slot.hasThirdStat,
+          status: slot.status,
+        }),
+      ),
+    ).toEqual([
+      {
+        slot: 1,
+        plateName: 'Bear',
+        level: 30,
+        rarity: 'epic',
+        hasThirdStat: true,
+        status: 'ok',
+      },
+      {
+        slot: 2,
+        plateName: 'Wolf',
+        level: 27,
+        rarity: 'epic',
+        hasThirdStat: false,
+        status: 'recommended',
+      },
+    ]);
+
+    expect(state.engraving.slotCount).toBe(14);
+    expect(state.engraving.perCharacter).toEqual([
+      {
+        characterId: 10,
+        name: 'Raven',
+        emptyCount: 10,
+        filledCount: 4,
+        emptySlots: expect.arrayContaining([
+          { slot: 2, label: 'Secondary weapon' },
+          { slot: 14, label: 'Decal' },
+        ]),
+      },
+    ]);
+
+    expect(state.cards.catalog.map((card: { name: string }) => card.name))
+      .toEqual(['Blue Dragon', 'Red Dragon']);
+    expect(state.cards.entries).toEqual([
+      {
+        characterId: 10,
+        cardId: 51,
+        cardName: 'Blue Dragon',
+        grade: 'magic',
+      },
+      {
+        characterId: 10,
+        cardId: 50,
+        cardName: 'Red Dragon',
+        grade: 'legend',
+      },
+    ]);
+  });
+
+  it('keeps the card catalog and clears character cards for versions 1 to 3', async () => {
+    setup();
+
+    const cardId = Number(
+      context.db
+        .prepare('INSERT INTO cards (name) VALUES (?)')
+        .run('Existing Card')
+        .lastInsertRowid,
+    );
+
+    const payloads = [
+      validPayload(),
+      validV2Payload(),
+      validV3Payload(),
+    ];
+    const versions = [1, 2, 3];
+
+    for (let index = 0; index < payloads.length; index += 1) {
+      const characterId = Number(
+        context.db
+          .prepare('INSERT INTO characters (name) VALUES (?)')
+          .run(`Seed ${versions[index]}`)
+          .lastInsertRowid,
+      );
+      const seedCardId = Number(
+        context.db
+          .prepare('INSERT INTO cards (name) VALUES (?)')
+          .run(`Seed Card ${versions[index]}`)
+          .lastInsertRowid,
+      );
+      context.db
+        .prepare(
+          'INSERT INTO character_cards (character_id, card_id, grade) VALUES (?, ?, ?)',
+        )
+        .run(characterId, seedCardId, 'rare');
+      context.db
+        .prepare(
+          'INSERT INTO character_cards (character_id, card_id, grade) VALUES (?, ?, ?)',
+        )
+        .run(characterId, cardId, 'magic');
+
+      await request(context.app)
+        .post('/api/data/import')
+        .send(payloads[index])
+        .expect(200);
+
+      expect(
+        context.db.prepare('SELECT COUNT(*) AS count FROM character_cards').get(),
+      ).toEqual({ count: 0 });
+    }
+
+    expect(
+      context.db.prepare('SELECT COUNT(*) AS count FROM cards').get(),
+    ).toEqual({ count: 4 });
+  });
+
+  it('replaces the card catalog and character cards for version 4', async () => {
+    setup();
+
+    const characterId = Number(
+      context.db
+        .prepare('INSERT INTO characters (name) VALUES (?)')
+        .run('Existing')
+        .lastInsertRowid,
+    );
+    const cardId = Number(
+      context.db
+        .prepare('INSERT INTO cards (name) VALUES (?)')
+        .run('Existing Card')
+        .lastInsertRowid,
+    );
+    context.db
+      .prepare(
+        'INSERT INTO character_cards (character_id, card_id, grade) VALUES (?, ?, ?)',
+      )
+      .run(characterId, cardId, 'legend');
+
+    await request(context.app)
+      .post('/api/data/import')
+      .send(validV4Payload())
+      .expect(200);
+
+    const state = (await request(context.app).get('/api/state').expect(200))
+      .body;
+    expect(
+      state.cards.catalog.map((card: { name: string }) => card.name),
+    ).toEqual(['Blue Dragon', 'Red Dragon']);
+    expect(state.cards.entries).toHaveLength(2);
   });
 
   it('accepts empty engraving category arrays in a version 3 file', async () => {
@@ -533,15 +825,81 @@ describe('import', () => {
   it('rejects invalid payloads without changing the database or creating a backup', async () => {
     setup();
 
-    await request(context.app)
-      .post('/api/characters')
-      .send({ name: 'Original' })
-      .expect(201);
+    const characterId = Number(
+      context.db
+        .prepare('INSERT INTO characters (name) VALUES (?)')
+        .run('Original').lastInsertRowid,
+    );
+    const nestId = Number(
+      context.db
+        .prepare('INSERT INTO nests (name) VALUES (?)')
+        .run('Original Nest').lastInsertRowid,
+    );
+    context.db
+      .prepare(
+        `INSERT INTO runs (character_id, nest_id, week_key, completed_at)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(
+        characterId,
+        nestId,
+        '2026-10-17',
+        '2026-10-17T05:00:00.000Z',
+      );
+    context.db.prepare('INSERT INTO plate_levels (value) VALUES (?)').run(30);
+    const plateId = Number(
+      context.db
+        .prepare('INSERT INTO plates (name) VALUES (?)')
+        .run('Original Plate').lastInsertRowid,
+    );
+    context.db
+      .prepare(
+        `INSERT INTO character_heraldry
+           (character_id, slot, plate_id, level, rarity, has_third_stat)
+         VALUES (?, 1, ?, 30, 'rare', 0)`,
+      )
+      .run(characterId, plateId);
+
+    const engravingValue = context.db
+      .prepare(
+        `SELECT id FROM engraving_values
+          WHERE category = 'weapon'
+          ORDER BY id
+          LIMIT 1`,
+      )
+      .get() as { id: number } | undefined;
+    if (!engravingValue) {
+      throw new Error('Expected the engraving seed to create a weapon value.');
+    }
+    context.db
+      .prepare(
+        `INSERT INTO character_engraving
+           (character_id, slot, value_id, third_stat_name, third_stat_value)
+         VALUES (?, 1, ?, NULL, NULL)`,
+      )
+      .run(characterId, engravingValue.id);
+
+    const cardId = Number(
+      context.db
+        .prepare('INSERT INTO cards (name) VALUES (?)')
+        .run('Original Card').lastInsertRowid,
+    );
+    context.db
+      .prepare(
+        `INSERT INTO character_cards (character_id, card_id, grade)
+         VALUES (?, ?, 'magic')`,
+      )
+      .run(characterId, cardId);
 
     const before = await fetchState(context.app);
+    const databaseBefore = readDatabaseSnapshot(context.db);
+    const backupsBefore = fs.readdirSync(context.backupDir);
+    for (const [table, rows] of Object.entries(databaseBefore)) {
+      expect(rows.length, table).toBeGreaterThan(0);
+    }
 
     const cases: Array<{ label: string; payload: unknown }> = [
-      { label: 'bad version', payload: { ...validPayload(), version: 4 } },
+      { label: 'bad version', payload: { ...validPayload(), version: 5 } },
       {
         label: 'characters not array',
         payload: { ...validPayload(), characters: {} },
@@ -1031,6 +1389,89 @@ describe('import', () => {
           ],
         },
       },
+      {
+        label: 'v4 missing cards',
+        payload: { ...validV4Payload(), cards: undefined },
+      },
+      {
+        label: 'v4 missing characterCards',
+        payload: { ...validV4Payload(), characterCards: undefined },
+      },
+      {
+        label: 'v4 invalid card grade',
+        payload: {
+          ...validV4Payload(),
+          characterCards: [
+            { characterId: 10, cardId: 50, grade: 'mythic' },
+          ],
+        },
+      },
+      {
+        label: 'v4 unknown card reference',
+        payload: {
+          ...validV4Payload(),
+          characterCards: [
+            { characterId: 10, cardId: 999, grade: 'rare' },
+          ],
+        },
+      },
+      {
+        label: 'v4 unknown character reference',
+        payload: {
+          ...validV4Payload(),
+          characterCards: [
+            { characterId: 999, cardId: 50, grade: 'rare' },
+          ],
+        },
+      },
+      {
+        label: 'v4 duplicate character card',
+        payload: {
+          ...validV4Payload(),
+          characterCards: [
+            { characterId: 10, cardId: 50, grade: 'rare' },
+            { characterId: 10, cardId: 50, grade: 'epic' },
+          ],
+        },
+      },
+      {
+        label: 'v4 duplicate card ids',
+        payload: {
+          ...validV4Payload(),
+          cards: [
+            { id: 50, name: 'A' },
+            { id: 50, name: 'B' },
+          ],
+          characterCards: [],
+        },
+      },
+      {
+        label: 'v4 duplicate card names case-insensitively',
+        payload: {
+          ...validV4Payload(),
+          cards: [
+            { id: 50, name: 'Alpha' },
+            { id: 51, name: 'alpha' },
+          ],
+          characterCards: [],
+        },
+      },
+      {
+        label: 'v4 blank card name',
+        payload: {
+          ...validV4Payload(),
+          cards: [{ id: 50, name: '   ' }],
+          characterCards: [],
+        },
+      },
+      {
+        label: 'v4 long card name',
+        payload: {
+          ...validV4Payload(),
+          cards: [{ id: 50, name: 'x'.repeat(51) }],
+          characterCards: [],
+        },
+      },
     ];
 
     for (const testCase of cases) {
@@ -1039,11 +1480,17 @@ describe('import', () => {
         .send(testCase.payload);
       expect(response.status, testCase.label).toBe(400);
       expect(response.body.error.code, testCase.label).toBe('INVALID_IMPORT');
+      expect(readDatabaseSnapshot(context.db), testCase.label).toEqual(
+        databaseBefore,
+      );
+      expect(fs.readdirSync(context.backupDir), testCase.label).toEqual(
+        backupsBefore,
+      );
     }
 
     const after = await fetchState(context.app);
     expect(after).toEqual(before);
-    expect(fs.readdirSync(context.backupDir)).toEqual([]);
+    expect(fs.readdirSync(context.backupDir)).toEqual(backupsBefore);
   });
 
   it('returns 400 for malformed JSON', async () => {

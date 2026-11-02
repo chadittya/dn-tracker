@@ -11,6 +11,7 @@ import type {
   Tab,
 } from './lib/navigation';
 import { BackupPage } from './pages/BackupPage';
+import { CardsPage } from './pages/CardsPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { EngravingPage } from './pages/EngravingPage';
 import { HeraldryPage } from './pages/HeraldryPage';
@@ -75,6 +76,7 @@ export default function App() {
             initialCharacterQuery={characterPrefillForTab(prefill, 'engraving')}
           />
         )}
+        {tab === 'cards' && <CardsPage onNavigate={navigate} />}
         {tab === 'dashboard' && <DashboardPage onNavigate={navigate} />}
         {tab === 'backup' && <BackupPage />}
         {tab === 'manage' && <ManagePage />}

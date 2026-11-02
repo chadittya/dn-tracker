@@ -181,6 +181,65 @@ export interface EngravingAffectedSlot {
   slotLabel: string;
 }
 
+export type CardGrade = 'magic' | 'rare' | 'epic' | 'unique' | 'legend';
+
+export interface CardGradeMeta {
+  key: CardGrade;
+  label: string;
+  rank: number;
+}
+
+export interface CardCatalogEntry {
+  id: number;
+  name: string;
+  createdAt: string;
+}
+
+export interface CharacterCardEntry {
+  characterId: number;
+  cardId: number;
+  cardName: string;
+  grade: CardGrade;
+}
+
+export interface CharacterCardSummary {
+  characterId: number;
+  name: string;
+  count: number;
+  total: number;
+}
+
+export interface CardsState {
+  grades: CardGradeMeta[];
+  catalog: CardCatalogEntry[];
+  entries: CharacterCardEntry[];
+  perCharacter: CharacterCardSummary[];
+}
+
+export interface CardFinderResult {
+  characterId: number;
+  name: string;
+  grade: CardGrade | null;
+}
+
+export interface CardAffectedCharacter {
+  characterId: number;
+  characterName: string;
+  grade: CardGrade;
+}
+
+export interface CardUsageResponse {
+  cardId: number;
+  affectedCount: number;
+  affectedCharacters: CardAffectedCharacter[];
+}
+
+export interface CardBulkImportResult {
+  added: number;
+  skipped: number;
+  invalid: number;
+}
+
 export interface AppState {
   weekKey: string;
   weekStartAt: string;
@@ -192,6 +251,7 @@ export interface AppState {
   dashboard: Dashboard;
   heraldry: HeraldryState;
   engraving: EngravingState;
+  cards: CardsState;
 }
 
 export type BackupKind = 'app' | 'preimport';
@@ -213,6 +273,8 @@ export interface ImportResult {
     heraldrySlots: number;
     engravingValues: number;
     engravingSlots: number;
+    cards: number;
+    cardSlots: number;
   };
   backup: string;
 }

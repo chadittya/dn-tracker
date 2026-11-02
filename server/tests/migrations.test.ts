@@ -84,6 +84,8 @@ describe('migrations', () => {
         'character_heraldry',
         'engraving_values',
         'character_engraving',
+        'cards',
+        'character_cards',
       ]),
     );
 
@@ -98,6 +100,7 @@ describe('migrations', () => {
         'idx_character_heraldry_plate_id',
         'idx_character_heraldry_level',
         'idx_character_engraving_value_id',
+        'idx_character_cards_card_id',
       ]),
     );
     db.close();
@@ -224,6 +227,8 @@ describe('migrations', () => {
         'character_heraldry',
         'engraving_values',
         'character_engraving',
+        'cards',
+        'character_cards',
       ]),
     );
     db.close();
@@ -281,6 +286,104 @@ describe('migrations', () => {
     ).toEqual({ count: 136 });
     expect(
       db.prepare('SELECT COUNT(*) AS count FROM character_engraving').get(),
+    ).toEqual({ count: 0 });
+    db.close();
+  });
+
+  it('upgrades a version 3 database and keeps engraving data', () => {
+    const dbPath = tempDbPath();
+    const raw = new Database(dbPath);
+    migrations[0]!.up(raw);
+    migrations[1]!.up(raw);
+    migrations[2]!.up(raw);
+    raw.pragma('user_version = 3');
+
+    raw
+      .prepare('INSERT INTO characters (id, name, created_at) VALUES (1, ?, ?)')
+      .run('Raven', '2026-01-01T00:00:00.000Z');
+    raw
+      .prepare(
+        `INSERT INTO character_engraving
+           (character_id, slot, value_id, third_stat_name, third_stat_value)
+         VALUES (1, 1, 1, 'Critical Damage', 125)`,
+      )
+      .run();
+    raw.close();
+
+    const db = openDatabase(dbPath);
+    expect(db.pragma('user_version', { simple: true })).toBe(4);
+    expect(
+      db
+        .prepare(
+          `SELECT character_id AS characterId, slot, value_id AS valueId,
+                  third_stat_name AS thirdStatName,
+                  third_stat_value AS thirdStatValue
+             FROM character_engraving`,
+        )
+        .all(),
+    ).toEqual([
+      {
+        characterId: 1,
+        slot: 1,
+        valueId: 1,
+        thirdStatName: 'Critical Damage',
+        thirdStatValue: 125,
+      },
+    ]);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM cards').get()).toEqual({
+      count: 0,
+    });
+    expect(
+      db.prepare('SELECT COUNT(*) AS count FROM character_cards').get(),
+    ).toEqual({ count: 0 });
+    db.close();
+  });
+
+  it('enforces card constraints and cascades', () => {
+    const db = openDatabase(tempDbPath());
+    const characterId = Number(
+      db.prepare('INSERT INTO characters (name) VALUES (?)').run('Raven')
+        .lastInsertRowid,
+    );
+    const cardId = Number(
+      db.prepare('INSERT INTO cards (name) VALUES (?)').run('Red Dragon')
+        .lastInsertRowid,
+    );
+
+    const createdAt = db
+      .prepare('SELECT created_at AS createdAt FROM cards WHERE id = ?')
+      .get(cardId) as { createdAt: string };
+    expect(createdAt.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+
+    const insertCard = (grade: string) =>
+      db
+        .prepare(
+          'INSERT INTO character_cards (character_id, card_id, grade) VALUES (?, ?, ?)',
+        )
+        .run(characterId, cardId, grade);
+
+    insertCard('magic');
+    expect(() => insertCard('legend')).toThrow(/UNIQUE constraint/);
+    expect(() => insertCard('invalid')).toThrow(/CHECK/);
+    expect(() =>
+      db.prepare('INSERT INTO cards (name) VALUES (?)').run('red dragon'),
+    ).toThrow(/UNIQUE/);
+
+    db.prepare('DELETE FROM cards WHERE id = ?').run(cardId);
+    expect(
+      db.prepare('SELECT COUNT(*) AS count FROM character_cards').get(),
+    ).toEqual({ count: 0 });
+
+    const secondCardId = Number(
+      db.prepare('INSERT INTO cards (name) VALUES (?)').run('Gold Dragon')
+        .lastInsertRowid,
+    );
+    db.prepare(
+      'INSERT INTO character_cards (character_id, card_id, grade) VALUES (?, ?, ?)',
+    ).run(characterId, secondCardId, 'rare');
+    db.prepare('DELETE FROM characters WHERE id = ?').run(characterId);
+    expect(
+      db.prepare('SELECT COUNT(*) AS count FROM character_cards').get(),
     ).toEqual({ count: 0 });
     db.close();
   });

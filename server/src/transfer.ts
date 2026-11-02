@@ -1,4 +1,6 @@
 import type Database from 'better-sqlite3';
+import { parseCardGrade } from './cards';
+import type { CardGrade } from './cards';
 import { ApiError } from './errors';
 import {
   compareEngravingValues,
@@ -89,8 +91,20 @@ export interface ExportEngraving {
   thirdStatValue: number | null;
 }
 
+export interface ExportCard {
+  id: number;
+  name: string;
+  createdAt: string;
+}
+
+export interface ExportCharacterCard {
+  characterId: number;
+  cardId: number;
+  grade: CardGrade;
+}
+
 export interface ExportData {
-  version: 3;
+  version: 4;
   exportedAt: string;
   characters: ExportCharacter[];
   nests: ExportNest[];
@@ -100,10 +114,12 @@ export interface ExportData {
   characterHeraldry: ExportHeraldry[];
   engravingValues: ExportEngravingValues;
   characterEngraving: ExportEngraving[];
+  cards: ExportCard[];
+  characterCards: ExportCharacterCard[];
 }
 
 interface ValidatedImport {
-  version: 1 | 2 | 3;
+  version: 1 | 2 | 3 | 4;
   characters: ExportCharacter[];
   nests: ExportNest[];
   runs: ExportRun[];
@@ -112,6 +128,8 @@ interface ValidatedImport {
   characterHeraldry: ExportHeraldry[];
   engravingValues: EngravingValue[];
   characterEngraving: CharacterEngravingRow[];
+  cards: ExportCard[];
+  characterCards: ExportCharacterCard[];
 }
 
 function invalid(message: string): never {
@@ -427,15 +445,60 @@ function validateCharacterEngraving(
   return result;
 }
 
+function validateCharacterCards(
+  raw: unknown,
+  label: string,
+  characterIds: ReadonlySet<number>,
+  cardIds: ReadonlySet<number>,
+): ExportCharacterCard[] {
+  const entries = asArray(raw, label);
+  const keys = new Set<string>();
+  const result: ExportCharacterCard[] = [];
+
+  entries.forEach((entry, index) => {
+    const prefix = `${label}[${index}]`;
+    const record = asRecord(entry, prefix);
+    const characterId = withLabel(`${prefix}.characterId`, () =>
+      parseId(record.characterId),
+    );
+    const cardId = withLabel(`${prefix}.cardId`, () =>
+      parseId(record.cardId),
+    );
+    const grade = withLabel(`${prefix}.grade`, () =>
+      parseCardGrade(record.grade),
+    );
+
+    if (!characterIds.has(characterId)) {
+      invalid(`${prefix} references unknown character ${characterId}.`);
+    }
+    if (!cardIds.has(cardId)) {
+      invalid(`${prefix} references unknown card ${cardId}.`);
+    }
+
+    const key = `${characterId}:${cardId}`;
+    if (keys.has(key)) {
+      invalid(
+        `Duplicate card for character ${characterId}, card ${cardId}.`,
+      );
+    }
+    keys.add(key);
+
+    result.push({ characterId, cardId, grade });
+  });
+
+  return result;
+}
+
 export function validateImportPayload(raw: unknown): ValidatedImport {
   const payload = asRecord(raw, 'Import payload');
 
   if (
     payload.version !== 1 &&
     payload.version !== 2 &&
-    payload.version !== 3
+    payload.version !== 3 &&
+    payload.version !== 4
   ) {
-    invalid('Unsupported import version. Expected version 1, 2, or 3.');
+    invalid('Unsupported import version. Expected version 1, 2, 3, or 4.');
   }
 
   const version = payload.version;
@@ -500,7 +563,7 @@ export function validateImportPayload(raw: unknown): ValidatedImport {
   let plates: ExportPlate[] = [];
   let characterHeraldry: ExportHeraldry[] = [];
 
-  if (version === 2 || version === 3) {
+  if (version === 2 || version === 3 || version === 4) {
     plateLevels = validatePlateLevels(payload.plateLevels, 'plateLevels');
     plates = validateNamedEntries(payload.plates, 'plates');
     const plateIds = new Set(plates.map((plate) => plate.id));
@@ -516,7 +579,7 @@ export function validateImportPayload(raw: unknown): ValidatedImport {
   let engravingValues: EngravingValue[] = [];
   let characterEngraving: CharacterEngravingRow[] = [];
 
-  if (version === 3) {
+  if (version === 3 || version === 4) {
     engravingValues = validateEngravingValues(
       payload.engravingValues,
       'engravingValues',
@@ -532,6 +595,20 @@ export function validateImportPayload(raw: unknown): ValidatedImport {
     );
   }
 
+  let cards: ExportCard[] = [];
+  let characterCards: ExportCharacterCard[] = [];
+
+  if (version === 4) {
+    cards = validateNamedEntries(payload.cards, 'cards');
+    const cardIds = new Set(cards.map((card) => card.id));
+    characterCards = validateCharacterCards(
+      payload.characterCards,
+      'characterCards',
+      characterIds,
+      cardIds,
+    );
+  }
+
   return {
     version,
     characters,
@@ -542,6 +619,8 @@ export function validateImportPayload(raw: unknown): ValidatedImport {
     characterHeraldry,
     engravingValues,
     characterEngraving,
+    cards,
+    characterCards,
   };
 }
 
@@ -565,7 +644,7 @@ export function exportData(db: Database.Database, now: Date): ExportData {
   }
 
   return {
-    version: 3,
+    version: 4,
     exportedAt: now.toISOString(),
     characters: db
       .prepare(
@@ -588,6 +667,16 @@ export function exportData(db: Database.Database, now: Date): ExportData {
     characterHeraldry: readHeraldryRows(db),
     engravingValues,
     characterEngraving: readCharacterEngravingRows(db),
+    cards: db
+      .prepare('SELECT id, name, created_at AS createdAt FROM cards ORDER BY id')
+      .all() as ExportCard[],
+    characterCards: db
+      .prepare(
+        `SELECT character_id AS characterId, card_id AS cardId, grade
+           FROM character_cards
+          ORDER BY character_id, card_id`,
+      )
+      .all() as ExportCharacterCard[],
   };
 }
 
@@ -606,6 +695,8 @@ export async function importData(
     heraldrySlots: number;
     engravingValues: number;
     engravingSlots: number;
+    cards: number;
+    cardSlots: number;
   };
   backup: string;
 }> {
@@ -616,8 +707,13 @@ export async function importData(
   const fallbackTimestamp = now().toISOString();
 
   const replace = db.transaction(() => {
+    db.prepare('DELETE FROM character_cards').run();
+    if (data.version === 4) {
+      db.prepare('DELETE FROM cards').run();
+    }
+
     db.prepare('DELETE FROM character_engraving').run();
-    if (data.version === 3) {
+    if (data.version === 3 || data.version === 4) {
       db.prepare('DELETE FROM engraving_values').run();
     }
 
@@ -644,6 +740,29 @@ export async function importData(
     );
     for (const nest of data.nests) {
       insertNest.run(nest.id, nest.name, nest.createdAt || fallbackTimestamp);
+    }
+
+    const insertCard = db.prepare(
+      'INSERT INTO cards (id, name, created_at) VALUES (?, ?, ?)',
+    );
+    for (const card of data.cards) {
+      insertCard.run(
+        card.id,
+        card.name,
+        card.createdAt || fallbackTimestamp,
+      );
+    }
+
+    const insertCharacterCard = db.prepare(
+      `INSERT INTO character_cards (character_id, card_id, grade)
+       VALUES (?, ?, ?)`,
+    );
+    for (const entry of data.characterCards) {
+      insertCharacterCard.run(
+        entry.characterId,
+        entry.cardId,
+        entry.grade,
+      );
     }
 
     const insertLevel = db.prepare(
@@ -736,6 +855,8 @@ export async function importData(
       heraldrySlots: data.characterHeraldry.length,
       engravingValues: data.engravingValues.length,
       engravingSlots: data.characterEngraving.length,
+      cards: data.cards.length,
+      cardSlots: data.characterCards.length,
     },
     backup: backup.filename,
   };

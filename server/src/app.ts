@@ -17,6 +17,10 @@ import { createNestsRouter } from './routes/nests';
 import { createRunsRouter } from './routes/runs';
 import { createHeraldryRouter } from './routes/heraldry';
 import { createEngravingRouter } from './routes/engraving';
+import {
+  createCardsRouter,
+  createCharacterCardsRouter,
+} from './routes/cards';
 import { createBackupsRouter } from './routes/backups';
 import { createDataRouter } from './routes/data';
 
@@ -79,6 +83,8 @@ export function createApp(options: CreateAppOptions): Express {
   app.use('/api/runs', createRunsRouter(db, now));
   app.use('/api/heraldry', createHeraldryRouter(db));
   app.use('/api/engraving', createEngravingRouter(db));
+  app.use('/api/cards', createCardsRouter(db));
+  app.use('/api/character-cards', createCharacterCardsRouter(db));
   app.use('/api/backups', createBackupsRouter(backupDir));
   app.use('/api/data', createDataRouter(db, backupService, now));
 

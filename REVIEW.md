@@ -692,3 +692,429 @@ events. The following browser checks remain:
 ## 7. Open questions
 
 None. The approved plan covered the behavior implemented here.
+
+---
+
+# Review — Dragon Nest Run Tracker v3.3 Cards
+
+## 1. Summary
+
+v3.3 adds a card catalog and a persistent, per-character grade for each card:
+
+- The catalog stores a name only. Every character has zero or one entry per
+  card, with one of five ordered grades: Magic < Rare < Epic < Unique < Legend.
+- Card data is independent of the weekly reset. There is no `week_key` and no
+  weekly status.
+- All grade, lower-than, finder and count rules are pure functions in
+  `server/src/cards.ts`. The API returns the catalog, character entries,
+  per-character counts and finder results; the frontend renders them.
+- Migration 4 adds `cards` and `character_cards`.
+- `GET /api/state` gains an additive `cards` block.
+- New endpoints manage cards, usage, bulk import, the finder and character
+  grades.
+- The frontend gains a Cards tab after Engraving, with a finder, a character
+  list, a character side panel and a new Manage section for the catalog.
+- Export is now `version: 4`; import accepts versions 1 to 4. Version 4
+  replaces the card catalog and all character cards. Versions 1 to 3 keep the
+  current catalog and clear every character's cards.
+
+No new dependency was added. Week/reset behavior, runs, heraldry, engraving,
+Dashboard content and `seed:dev` are unchanged.
+
+### Key decisions
+
+- Migration 4 was appended. Migrations 1 to 3 were not edited. The
+  `cards.created_at` default is exactly the same expression used by migration 1
+  and the other tables.
+- Card names use SQLite ASCII `NOCASE` uniqueness. Card ordering uses an ASCII
+  fold plus Unicode code-point comparison, with id as the tie-break. This
+  matches SQLite's NOCASE ordering and deliberately avoids `localeCompare`.
+- `parseCardGrade` lives in `server/src/cards.ts`, importing the existing name
+  helpers from `validation.ts`. No new name module was created and there is no
+  import cycle.
+- Grade colors reuse the engraving colors for Rare through Legend. Magic adds a
+  green definition with the `○` icon. Badges always show icon plus text.
+- The ComboBox is dependency-free. Typing activates the first match so Enter
+  selects it. Escape with the list open closes only the list; Escape with the
+  list closed reaches the panel and closes it.
+- `CardCharacterPanel` is rendered with `key={characterId}`, so switching
+  characters resets the note, add form and grade editor.
+- Bulk import clears the textarea only when `invalid === 0`. When any line is
+  invalid, the paste is kept for correction. Re-import is safe because
+  existing names are skipped.
+- Bulk import keeps Express's default 100 KB body limit. Only
+  `/api/data/import` has a larger limit.
+
+## 2. Requirement mapping
+
+### Data and domain
+
+- [x] Migration 4 creates `cards` (`id`, unique NOCASE `name`, `created_at`)
+      and `character_cards` (`character_id`, `card_id`, `grade`, composite
+      primary key), with the card-id index and both cascades.
+- [x] `character_cards.grade` is constrained to `magic`, `rare`, `epic`,
+      `unique`, `legend`.
+- [x] Grades are fixed and ordered Magic < Rare < Epic < Unique < Legend.
+- [x] A character has at most one row per card. Changing a grade is an upsert
+      in either direction.
+- [x] Card data has no `week_key` and is untouched by the weekly reset.
+- [x] Grade order, lower-than, finder building, per-character counts, catalog
+      sorting and bulk-import planning are pure functions in
+      `server/src/cards.ts`.
+- [x] The finder includes only characters with no entry or a lower grade.
+      Equal and higher grades are excluded. Order is missing first, then lowest
+      grade, then name, then id.
+- [x] The frontend does not recompute grade rank, lower-than or catalog counts.
+      Filtered-result counts such as `N of M cards` are presentation counts of
+      the visible list.
+
+### API and Manage
+
+- [x] `POST /api/cards`, `PATCH /api/cards/:id`, `DELETE /api/cards/:id` with
+      validation, 404 and case-insensitive duplicate errors.
+- [x] `GET /api/cards/:id/usage` returns `affectedCount` and the affected
+      characters for the delete confirmation.
+- [x] Renaming a card keeps every character's grade.
+- [x] Deleting a card cascades to every character.
+- [x] `POST /api/cards/import` accepts `{ text }`, trims lines, ignores empty
+      lines, rejects names over 50 characters, and skips existing or in-paste
+      duplicate names. Valid lines are always inserted in one transaction.
+- [x] `GET /api/cards/finder?cardId=&grade=` validates the id, grade and card,
+      and returns the card, target grade and ordered results.
+- [x] `PUT /api/character-cards` validates character, card and grade and
+      upserts. `DELETE /api/character-cards/:characterId/:cardId` is
+      idempotent and returns 404 only for an unknown character.
+- [x] Deleting a character cascades to their cards. The Manage character delete
+      warning mentions cards.
+- [x] Manage Cards supports add, live duplicate matches, rename, delete,
+      search and bulk import.
+- [x] The Manage Cards list is sorted A to Z, unlike the newest-first
+      Characters, Nests and Plates lists. Pipeline is sort, search all,
+      paginate; 10 per page; footer only above 10.
+- [x] Page resets on search and successful add or bulk import. Delete and
+      rename keep the page, clamped.
+- [x] The delete confirmation uses the server usage count and the singular or
+      plural wording.
+- [x] The bulk-import summary reports added, skipped and invalid counts. The
+      textarea is cleared only when there are no invalid lines.
+
+### Cards tab
+
+- [x] Tab order is Runs, Matrix, Heraldry, Engraving, Cards, Dashboard, Backup,
+      Manage.
+- [x] Finder uses a searchable card combo and five target-grade buttons. It
+      sends no request until both are chosen.
+- [x] Finder results show "No card" or the grade badge plus "Below target".
+      They are informational only and have no click action.
+- [x] The finder refreshes after every add, grade change or removal through
+      `refresh()` plus a nonce.
+- [x] The character list shows `Cards: N / total` from the server summaries,
+      supports name search, one Clear filters, and "Showing X of Y characters".
+- [x] Opening a character shows a side panel on wide screens and a dialog on
+      narrow screens, one character at a time.
+- [x] The panel lists that character's cards A to Z with its own search and
+      `N of M cards` while filtering.
+- [x] Add card uses a searchable combo with owned cards hidden. There is no
+      default grade; Add stays disabled until both card and grade are chosen.
+- [x] Grade editing offers all five grades up or down. Save is disabled when
+      the grade is unchanged.
+- [x] Remove is immediate with no confirmation. The panel shows
+      `Removed {card} from {character}` until the next add, grade change,
+      removal or close.
+- [x] Grade badges always show icon plus text. Magic is green; Rare through
+      Legend reuse engraving colors. Contrast was checked in light and dark
+      mode.
+
+### Export, import and backups
+
+- [x] Export is `version: 4` and adds `cards` (`id`, `name`, `createdAt`) and
+      `characterCards` (`characterId`, `cardId`, `grade`) in stable id order.
+- [x] Import accepts versions 1 to 4. Version 4 requires both arrays; empty
+      arrays are valid. Each character card must reference a character and card
+      in the same file, have a valid grade, and be unique per
+      character/card pair.
+- [x] All validation happens before the preimport backup and before any
+      database change. Invalid imports create no backup and change nothing.
+- [x] Version 4 replaces the catalog and all character cards. Versions 1 to 3
+      keep the current catalog and clear all character cards.
+- [x] Older behavior is unchanged: v1 clears heraldry; v1/v2 clear character
+      engraving but keep value tables; v3 replaces both.
+- [x] Import result counts include `cards` and `cardSlots`; older versions
+      report zero for both.
+- [x] Automatic and preimport SQLite backups include card tables without extra
+      code.
+
+## 3. Changed files
+
+Server, modified:
+
+- `server/src/app.ts`
+- `server/src/migrations.ts`
+- `server/src/routes/state.ts`
+- `server/src/transfer.ts`
+- `server/tests/import.test.ts`
+- `server/tests/migrations.test.ts`
+
+Server, new:
+
+- `server/src/cards.ts`
+- `server/src/cardsData.ts`
+- `server/src/routes/cards.ts`
+- `server/tests/cards.test.ts`
+- `server/tests/cards-api.test.ts`
+
+Web, modified:
+
+- `web/src/App.tsx`
+- `web/src/api/client.ts`
+- `web/src/api/types.ts`
+- `web/src/lib/engravingColors.ts`
+- `web/src/lib/navigation.ts`
+- `web/src/lib/navigation.test.ts`
+- `web/src/pages/BackupPage.tsx`
+- `web/src/pages/ManagePage.tsx`
+
+Web, new:
+
+- `web/src/lib/cards.ts`
+- `web/src/lib/cards.test.ts`
+- `web/src/components/CardCharacterList.tsx`
+- `web/src/components/CardCharacterPanel.tsx`
+- `web/src/components/CardGradeBadge.tsx`
+- `web/src/components/CardsFinder.tsx`
+- `web/src/components/CardsSection.tsx`
+- `web/src/components/ComboBox.tsx`
+- `web/src/pages/CardsPage.tsx`
+
+Docs:
+
+- `CLAUDE.md`
+- `README.md`
+- `REVIEW.md`
+
+No package or dependency changes. No changes to `data/`.
+
+## 4. Test results
+
+Commands run from the repository root:
+
+```text
+npm test
+npm run lint
+npm run build
+```
+
+Results after the final code edits:
+
+- `npm test`: **234 passed** across **20 test files**.
+- `npm run lint`: passed with no errors or warnings.
+- `npm run build`: passed server typecheck, dev typecheck, web typecheck, and
+  the Vite production build.
+
+New and updated coverage includes:
+
+- Card grade ranks, lower-than, ASCII-fold comparator, catalog sorting,
+  state building, finder ordering and bulk-import planning.
+- Card CRUD, duplicate rejection, A→Z state ordering, usage and cascade,
+  rename preserving grades, grade upsert in both directions, idempotent
+  removal, character cascade, bulk import and finder validation.
+- Fresh migration to version 4, v3→v4 upgrade preserving existing data,
+  card constraints and cascades, and the shared `created_at` format.
+- v4 export/import round trip with cards, counts, v1/v2/v3 catalog retention
+  and character-card clearing, v4 replacement, missing and invalid card
+  arrays, unknown references, duplicate pairs and invalid grades.
+- Web card sorting, filtering, option building, count and summary formatting,
+  and the updated tab order and `#/cards` hash.
+
+Vitest runs in a node environment with no jsdom or RTL, so ComboBox keyboard
+behavior, the side panel, and visual contrast remain manual checks.
+
+## 5. Documentation changes
+
+- `CLAUDE.md` Dashboard lists now include:
+  - Most remaining: top 10, sorted by remaining then name, View all to Matrix.
+  - Nests needing runs: top 5, sorted by remaining then name, View all to Runs.
+  - The all-runs-done replacement, and the fact that only the heraldry and
+    engraving lists stay outside that branch.
+- `CLAUDE.md` v4 export fields are now recorded exactly: `cards` uses `id`,
+  `name`, `createdAt`; `characterCards` uses `characterId`, `cardId`, `grade`;
+  both arrays are required and may be empty. The previous "fixed in the plan"
+  placeholder was removed.
+- `CLAUDE.md` documents the `cards.created_at` default and confirms it matches
+  the other tables.
+- `CLAUDE.md` API summary records the bulk-import `{ text }` body, the default
+  100 KB limit, and the character-card delete 404 behavior.
+- `README.md` documents the finder order (missing, lowest grade, then name)
+  instead of only the exclusion rule.
+- `README.md` documents that an invalid bulk-import paste stays in the box and
+  that re-import is safe, and that the bulk-import request is limited to
+  100 KB.
+- No unresolved doc/code contradiction remains after the audit.
+
+## 6. Assumptions and open questions
+
+1. The bulk-import request body is `{ text: string }` and stays under Express's
+   default 100 KB limit, as chosen. A future larger import needs a limit
+   decision.
+2. `skipped` combines names already in the catalog and duplicates inside the
+   paste. `invalid` counts only trimmed names over 50 characters. Empty lines
+   count nowhere. First occurrence wins and keeps its casing.
+3. Exported card `createdAt` is optional on import, matching plates. A missing
+   value falls back to the import timestamp.
+4. `DELETE /api/character-cards/:characterId/:cardId` returns 404 only for an
+   unknown character. An unknown card or absent row returns 204.
+5. Change-grade Save is disabled when the selected grade equals the current
+   grade.
+6. The Cards tab character list is not paginated; the spec did not ask for it.
+7. With an empty catalog, the finder is disabled with a Manage note, the add
+   combo is replaced by a note, and character rows show `Cards: 0 / 0`.
+8. The finder requires both a card and a grade. Selecting one alone sends no
+   request and shows no results.
+9. Older import files that contain card fields are ignored for those versions,
+   not rejected.
+10. Card ordering uses ASCII fold plus code-point comparison. This intentionally
+    differs from the engraving finder's `localeCompare`; non-ASCII names may
+    order differently between the two features.
+11. Bulk import returns HTTP 200 and a summary only; the request is not
+    rejected as a whole.
+12. The Cards Manage section sits below the engraving value tables.
+13. No forced-failure rollback test exists for bulk import. Validation and the
+    single-transaction insert are covered, but a synthetic mid-paste database
+    failure was not induced.
+
+## 7. Manual acceptance checklist
+
+Automated tests cannot exercise the browser UI. After `npm run dev` (which uses
+`data-dev/` only), check:
+
+1. Manage → Cards: add cards, rename one, delete one, and confirm A→Z order,
+   10 per page, search, and page reset on search and add.
+2. Bulk import a mix of valid names, an existing name, an in-paste duplicate,
+   an empty line and a name over 50 characters. Confirm the summary, that
+   valid lines were added, that the A→Z page reset, and that the textarea is
+   kept with an invalid line and cleared without one.
+3. Delete a card in use. Confirm the usage count wording, then that it is
+   removed from every character. Rename a card and confirm grades survive.
+4. Cards tab finder at each of the five grades: missing first, then lowest
+   grade, then name; equal/higher grades excluded; "No card" and "Below" shown
+   correctly.
+5. Open a character. Confirm cards A→Z, own search with `N of M cards`, add
+   combo hiding owned cards, no default grade, Add disabled until both are
+   chosen, any-direction grade change, and immediate remove with the note.
+6. Confirm the finder re-runs after every add, grade change and removal.
+7. ComboBox: type text and press Enter to select the first match. Escape with
+   the list open closes only the list; Escape with the list closed closes the
+   character panel.
+8. Switch directly from one character's panel to another and confirm the note,
+   add form and grade editor are reset.
+9. Character list: `Cards: N / total`, name search, one Clear filters, and
+   "Showing X of Y characters".
+10. Manage → Characters: the delete warning mentions cards, and deleting a
+    character removes their cards.
+11. Backup: export is version 4 with `cards` (`id`, `name`, `createdAt`) and
+    `characterCards`; import it back. Import an old v3 file and confirm the
+    catalog is kept and every character's cards are cleared. Check the v1/v2/v3
+    confirmation wording.
+12. Confirm Dashboard is unchanged, `seed:dev` still seeds no cards, and the
+    Magic badge is green with icon plus text in both themes.
+
+## Follow-up (v3.3 review)
+
+This follow-up changed tests and documentation only. No product behavior,
+migration, API contract or dependency changed.
+
+### 1. Version 4 replacement confirmed
+
+`POST /api/data/import` runs all validation before creating the pre-import
+backup (`server/src/transfer.ts:703-706`). The apply transaction then deletes:
+
+- `character_cards` always (`:710`), and `cards` for version 4 (`:711-713`);
+- `character_engraving` always (`:715`), and `engraving_values` for versions 3
+  and 4 (`:716-718`);
+- `character_heraldry`, `plates` and `plate_levels` always (`:720-722`).
+
+It reinserts the validated arrays. Therefore a version 4 file replaces all
+seven tables requested: `engraving_values`, `character_engraving`,
+`plate_levels`, `plates`, `character_heraldry`, `cards` and
+`character_cards`.
+
+Old-version retention is confirmed: v1/v2 keep `engraving_values`; v1/v2/v3
+keep `cards`; `character_cards` is always cleared and only v4 repopulates it.
+v2/v3/v4 replace heraldry from the file.
+
+### 2. Round-trip and invalid-import coverage
+
+`server/tests/import.test.ts` now has:
+
+- A full snapshot helper covering all ten tables (`:20-60`).
+- In the v4 round trip (`:555`), a whole-payload assertion after import
+  (`:581`) plus final-state assertions for heraldry, engraving and cards. The
+  same file contains all three domains.
+- In the invalid-import test (`:825`), seeded rows in every table, a guard that
+  every snapshot array is non-empty, and per-case assertions that the whole
+  database and backup directory are unchanged (`:1484-1487`). This covers
+  version 5, missing `cards`, missing `characterCards`, invalid grade, unknown
+  card, unknown character, duplicate `(character, card)`, duplicate card ids,
+  duplicate names case-insensitively, blank name, and name over 50 characters.
+
+### 3. Backup success message
+
+`web/src/pages/BackupPage.tsx:129-143` includes both
+`result.imported.cards` and `result.imported.cardSlots`. No change needed.
+
+### 4. Documentation audit
+
+Verified against code with no change needed:
+
+- Stack majors and test environment: React 19.3.1, Express 5.3.0,
+  better-sqlite3 13.0.3, Tailwind 4.3.3, Vite 8.3.4, Vitest 5.0.5, TypeScript
+  5.9.3, supertest 7.3.1, `strict: true`, Vitest `environment: 'node'`, no
+  jsdom/RTL.
+- Tab order: Runs, Matrix, Heraldry, Engraving, Cards, Dashboard, Backup,
+  Manage, matching `web/src/lib/navigation.ts:22-31` and its test.
+- Export field names: `cards` = id/name/createdAt and `characterCards` =
+  characterId/cardId/grade (`server/src/transfer.ts:94-119`).
+- v1/v2/v3 import behavior, including the delete conditions and reinserts.
+- Engraving third-stat rules: both-or-neither, trimmed 1-50 characters,
+  positive integer value, and category matching, in the route, import and DDL.
+- Dashboard run, heraldry and engraving list limits, sorting and navigation.
+- Card finder order: missing first, then lowest grade, then name.
+- Backup import success counts.
+
+Doc/code mismatches found and fixed:
+
+- `README.md` said every import replaces engraving values and the card list.
+  False for v1/v2 and v1/v2/v3 respectively. Reworked the warning and added
+  the per-version replacement list.
+- `README.md` and `CLAUDE.md` omitted that v2/v3 replace heraldry, v3/v4
+  replace engraving data, and v4 replaces every requested table. Added the
+  replacement matrix.
+- `README.md` said all non-card Manage lists are newest first, but plate levels
+  are highest value first. Corrected.
+- `CLAUDE.md` said server response order was unchanged; the cards block is
+  A to Z. Clarified.
+- `CLAUDE.md` API summary omitted methods for heraldry level/plate deletes and
+  plate patch/delete. Listed them.
+- `README.md` and `CLAUDE.md` seed text did not distinguish the seed script
+  from migration-seeded engraving values or retained catalogs. Clarified.
+  Cascades were verified in the DDL: character references in
+  `character_heraldry`, `character_engraving` and `character_cards` are all
+  `ON DELETE CASCADE`.
+- `README.md` Node range excluded Node 23/25 while claiming "22.12 or newer";
+  narrowed it and recorded Node 24.20.0 as the tested version.
+
+Recorded, not changed:
+
+- `package.json` still says version `1.0.0` while docs use v3.x feature labels.
+  This is project release metadata, not runtime behavior.
+- `server/src/seed-dev.ts:50` calls `new Date()` in the dev-only entry script.
+  Week computation remains in `week.ts`; this is a literal deviation from the
+  Code rules, not a functional defect.
+
+### 5. Verification
+
+```text
+npm test       234 passed across 20 test files
+npm run lint   passed, no errors or warnings
+npm run build  passed server/dev/web typechecks and Vite production build
+```
