@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   MANAGE_SECTIONS,
+  manageSpyThreshold,
   pickActiveSectionIndex,
 } from '../lib/manageSections';
 import type { ManageSection } from '../lib/manageSections';
@@ -16,7 +17,6 @@ const NAVIGATION_KEYS = new Set([
 ]);
 
 const SCROLL_LOCK_MS = 1200;
-const SPY_OFFSET_PX = 24;
 
 function readHeaderHeight(): number {
   const raw = getComputedStyle(document.documentElement).getPropertyValue(
@@ -30,6 +30,7 @@ export function ManageSidebar() {
   const [activeId, setActiveId] = useState(MANAGE_SECTIONS[0]!.id);
   const activeIdRef = useRef(activeId);
   const lockedRef = useRef(false);
+  const lastScrollYRef = useRef<number | null>(null);
   const rafRef = useRef<number | null>(null);
   const unlockCleanupRef = useRef<(() => void) | null>(null);
 
@@ -51,25 +52,41 @@ export function ManageSidebar() {
     [],
   );
 
-  const updateActive = useCallback(() => {
-    if (lockedRef.current) return;
+  const updateActive = useCallback(
+    (force = false) => {
+      const scrollY = window.scrollY;
 
-    const documentHeight = Math.max(
-      document.documentElement.scrollHeight,
-      document.body.scrollHeight,
-    );
-    const viewportHeight = window.innerHeight;
-    const scrollable = documentHeight > viewportHeight + 2;
-    const atBottom =
-      scrollable && window.scrollY + viewportHeight >= documentHeight - 2;
-    const index = pickActiveSectionIndex(
-      measureTops(),
-      readHeaderHeight() + SPY_OFFSET_PX,
-      atBottom,
-    );
-    const section = MANAGE_SECTIONS[index];
-    if (section) setActive(section.id);
-  }, [measureTops, setActive]);
+      if (lockedRef.current) {
+        // Record where the click navigation landed so layout-only re-measures
+        // after the lock releases do not look like a user scroll.
+        lastScrollYRef.current = scrollY;
+        return;
+      }
+
+      // A re-measure caused only by a layout change (notes, matches, an opened
+      // accordion) must not move the highlight. Only a real scroll or a window
+      // resize recomputes it.
+      if (!force && lastScrollYRef.current === scrollY) return;
+      lastScrollYRef.current = scrollY;
+
+      const documentHeight = Math.max(
+        document.documentElement.scrollHeight,
+        document.body.scrollHeight,
+      );
+      const viewportHeight = window.innerHeight;
+      const scrollable = documentHeight > viewportHeight + 2;
+      const atBottom =
+        scrollable && scrollY + viewportHeight >= documentHeight - 2;
+      const index = pickActiveSectionIndex(
+        measureTops(),
+        manageSpyThreshold(readHeaderHeight(), scrollY),
+        atBottom,
+      );
+      const section = MANAGE_SECTIONS[index];
+      if (section) setActive(section.id);
+    },
+    [measureTops, setActive],
+  );
 
   const scheduleUpdate = useCallback(() => {
     if (rafRef.current !== null) return;
@@ -81,6 +98,9 @@ export function ManageSidebar() {
 
   const releaseLock = useCallback(() => {
     lockedRef.current = false;
+    // The click may have moved the page. Remember the final position so the
+    // next layout-only re-measure is still treated as "no user scroll".
+    lastScrollYRef.current = window.scrollY;
     unlockCleanupRef.current?.();
   }, []);
 
@@ -88,7 +108,7 @@ export function ManageSidebar() {
     const onScroll = () => scheduleUpdate();
     const onResize = () => {
       releaseLock();
-      scheduleUpdate();
+      updateActive(true);
     };
 
     window.addEventListener('scroll', onScroll, { passive: true });
@@ -100,7 +120,7 @@ export function ManageSidebar() {
       if (element) observer.observe(element);
     }
 
-    scheduleUpdate();
+    updateActive(true);
 
     return () => {
       window.removeEventListener('scroll', onScroll);
@@ -112,7 +132,7 @@ export function ManageSidebar() {
       }
       releaseLock();
     };
-  }, [releaseLock, scheduleUpdate]);
+  }, [releaseLock, scheduleUpdate, updateActive]);
 
   const scrollToSection = (section: ManageSection) => {
     setActive(section.id);

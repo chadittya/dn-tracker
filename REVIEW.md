@@ -1312,3 +1312,66 @@ Recorded, not changed (pre-existing, non-v3.3.1):
   is disabled in that state.
 - The import entry point is hidden only when the card catalog is empty, so
   characters who already own every card can still import grade changes.
+
+---
+
+## v3.3.1 fix: sidebar highlight stability
+
+### Confirmed root cause
+
+The client hypothesis was partly right, but the primary cause was a coordinate
+mismatch. `measureTops()` returned document offsets (`rect.top + scrollY`), while
+`pickActiveSectionIndex` was given `headerHeight + 24` as the threshold, with no
+`scrollY` term. Once the click lock ended, any re-evaluation compared Nests'
+document offset against a ~104 px viewport threshold, so the spy fell back to
+index 0 (Characters). The `ResizeObserver` made this visible without scrolling:
+typing (live matches line), an add note, or an accordion toggle changed section
+heights and triggered a re-measure, which changed the highlight. Independently,
+the scroll target (`scroll-margin-top` = header + 24) and the spy threshold
+(header + 24) were identical, so sub-pixel rounding alone could also select the
+previous section.
+
+### Change
+
+- `manageSpyThreshold(headerHeight, scrollY)` now returns
+  `scrollY + headerHeight + MANAGE_SCROLL_OFFSET_PX (24) + MANAGE_SPY_TOLERANCE_PX (16)`.
+  Document offsets are compared consistently, and a click-placed section sits
+  16 px inside the active range.
+- `ManageSidebar` records the last evaluated `scrollY` and ignores re-measures
+  when it is unchanged. Locked scrolls and lock release update that value, so
+  layout-only changes after a click never move the highlight.
+- Window resize now forces a recompute; scrolling and sidebar clicks still do.
+- Kept: click lock, 1200 ms fallback, reduced motion, rAF throttling, button
+  links, and the narrow-screen chip row.
+
+### Files changed
+
+- `web/src/lib/manageSections.ts` — offset and tolerance constants, threshold
+  helper.
+- `web/src/components/ManageSidebar.tsx` — consistent threshold, scroll-delta
+  guard, forced resize recompute.
+- `web/src/lib/manageSections.test.ts` — threshold boundary and click-stability
+  cases.
+- `CLAUDE.md` — sidebar spy threshold and stability rule. `README.md` does not
+  describe the threshold, so no change was needed.
+
+### Verification
+
+```text
+npm test       268 passed across 22 test files
+npm run lint   passed
+npm run build  passed typechecks and Vite build
+```
+
+### Manual checklist
+
+- Click each sidebar link, then type in the section's add input: highlight must
+  stay on the clicked section.
+- Click a sidebar link, then add a record / show a note / show live matches:
+  highlight must not move.
+- Open and close engraving grade sections: highlight must not move.
+- Scroll normally: the highlight must follow the section under the header gap.
+- Resize the window: the highlight may update to the section in the new view.
+- Check the last section at page bottom and a click on the first section at the
+  top of the page.
+- Repeat with reduced motion enabled and on a narrow viewport.
