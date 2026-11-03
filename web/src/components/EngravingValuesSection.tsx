@@ -86,6 +86,7 @@ export function EngravingValuesSection({
   const [editBusy, setEditBusy] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   const [deleteTarget, setDeleteTarget] = useState<EngravingValue | null>(
     null,
@@ -102,6 +103,10 @@ export function EngravingValuesSection({
     setAddFirst('');
     setAddSecond('');
     setAddError(null);
+  };
+
+  const toggleGrade = (key: string) => {
+    setExpanded((current) => ({ ...current, [key]: current[key] !== true }));
   };
 
   const switchCategory = (category: EngravingCategory) => {
@@ -376,23 +381,61 @@ export function EngravingValuesSection({
         </p>
       )}
 
-      <div className="mt-5 space-y-5">
-        {grades.map((grade) => {
-          const gradeValues = values.filter(
-            (value) => value.grade === grade.key,
-          );
-          if (gradeValues.length === 0) return null;
+      <div className="mt-5 space-y-3">
+        {values.length === 0 ? (
+          <p className="muted rounded-xl border border-dashed border-slate-300 px-4 py-6 text-center dark:border-slate-700">
+            No {categoryMeta.label} values yet. Add one above.
+          </p>
+        ) : (
+          grades.map((grade) => {
+            const gradeValues = values.filter(
+              (value) => value.grade === grade.key,
+            );
+            const panelId = `engraving-values-${activeCategory}-${grade.key}`;
+            const stateKey = `${activeCategory}:${grade.key}`;
+            const open = expanded[stateKey] === true;
 
-          return (
-            <div key={grade.key}>
-              <h3 className="flex items-center gap-2 text-sm font-semibold">
-                <EngravingGradeBadge grade={grade.key} />
-                <span className="muted font-normal">
-                  {gradeValues.length} value
-                  {gradeValues.length === 1 ? '' : 's'}
-                </span>
-              </h3>
-              <ul className="mt-2 divide-y divide-slate-200 dark:divide-slate-800">
+            return (
+              <section
+                key={grade.key}
+                className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800"
+              >
+                <h3>
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-between gap-2 px-3 py-3 text-left text-sm font-semibold hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500 dark:hover:bg-slate-900/60"
+                    aria-expanded={open}
+                    aria-controls={panelId}
+                    onClick={() => toggleGrade(stateKey)}
+                  >
+                    <span className="flex items-center gap-2">
+                      <EngravingGradeBadge grade={grade.key} />
+                      <span className="muted font-normal">
+                        {gradeValues.length} value
+                        {gradeValues.length === 1 ? '' : 's'}
+                      </span>
+                    </span>
+                    <span
+                      aria-hidden="true"
+                      className={`transition-transform ${
+                        open ? 'rotate-180' : ''
+                      }`}
+                    >
+                      ▾
+                    </span>
+                  </button>
+                </h3>
+                <div
+                  id={panelId}
+                  hidden={!open}
+                  className="border-t border-slate-200 px-3 dark:border-slate-800"
+                >
+                  {gradeValues.length === 0 ? (
+                    <p className="muted py-3 text-sm">
+                      No {grade.label} values yet.
+                    </p>
+                  ) : (
+                    <ul className="divide-y divide-slate-200 dark:divide-slate-800">
                 {gradeValues.map((value) => {
                   const isEditing = editing?.id === value.id;
 
@@ -512,15 +555,12 @@ export function EngravingValuesSection({
                     </li>
                   );
                 })}
-              </ul>
-            </div>
-          );
-        })}
-
-        {values.length === 0 && (
-          <p className="muted rounded-xl border border-dashed border-slate-300 px-4 py-6 text-center dark:border-slate-700">
-            No {categoryMeta.label} values yet. Add one above.
-          </p>
+                    </ul>
+                  )}
+                </div>
+              </section>
+            );
+          })
         )}
       </div>
 

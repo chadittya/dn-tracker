@@ -218,6 +218,135 @@ export function findCardCandidates(
     });
 }
 
+export interface CharacterCardImportOperation {
+  cardId: number;
+  cardName: string;
+  grade: CardGrade;
+}
+
+export interface CharacterCardImportPlan {
+  /** Added and updated cards only, in input line order. */
+  operations: CharacterCardImportOperation[];
+  added: number;
+  updated: number;
+  unchanged: number;
+  duplicates: number;
+  invalid: number;
+  invalidLines: string[];
+}
+
+/**
+ * Match a grade label case-insensitively with SQLite NOCASE semantics
+ * (ASCII A-Z only). Returns null for an unknown grade.
+ */
+export function matchCardGrade(value: string): CardGrade | null {
+  const folded = foldNameForComparison(value.trim());
+  return (
+    CARD_GRADES.find(
+      (grade) => foldNameForComparison(grade) === folded,
+    ) ?? null
+  );
+}
+
+/**
+ * Plan a per-character `Card name, Grade` import. Pure: the caller supplies
+ * the catalog and every character-card row.
+ *
+ * A line is invalid when it has no comma, an empty name or grade, an unknown
+ * card, or an unknown grade. An invalid line never claims its card, so a later
+ * valid line for the same card is still applied. Once a valid line claims a
+ * card, every later line for that card is a duplicate and is skipped, even if
+ * that later line is otherwise malformed.
+ */
+export function planCharacterCardImport(
+  text: string,
+  catalog: readonly CardRow[],
+  characterId: number,
+  existingRows: readonly CharacterCardRow[],
+): CharacterCardImportPlan {
+  const cardByName = new Map<string, CardRow>();
+  for (const card of catalog) {
+    cardByName.set(foldNameForComparison(card.name), card);
+  }
+
+  const existingGrades = new Map<number, CardGrade>();
+  for (const row of existingRows) {
+    if (row.characterId === characterId) {
+      existingGrades.set(row.cardId, row.grade);
+    }
+  }
+
+  const claimed = new Set<number>();
+  const operations: CharacterCardImportOperation[] = [];
+  const invalidLines: string[] = [];
+  let added = 0;
+  let updated = 0;
+  let unchanged = 0;
+  let duplicates = 0;
+  let invalid = 0;
+
+  for (const rawLine of text.split(/\r\n|\r|\n/)) {
+    const line = rawLine.trim();
+    if (line.length === 0) continue;
+
+    const commaIndex = line.lastIndexOf(',');
+    if (commaIndex < 0) {
+      invalid += 1;
+      invalidLines.push(line);
+      continue;
+    }
+
+    const name = line.slice(0, commaIndex).trim();
+    const gradeText = line.slice(commaIndex + 1).trim();
+    if (name.length === 0 || gradeText.length === 0) {
+      invalid += 1;
+      invalidLines.push(line);
+      continue;
+    }
+
+    const card = cardByName.get(foldNameForComparison(name));
+    if (!card) {
+      invalid += 1;
+      invalidLines.push(line);
+      continue;
+    }
+
+    if (claimed.has(card.id)) {
+      duplicates += 1;
+      continue;
+    }
+
+    const grade = matchCardGrade(gradeText);
+    if (grade === null) {
+      invalid += 1;
+      invalidLines.push(line);
+      continue;
+    }
+
+    claimed.add(card.id);
+    const existingGrade = existingGrades.get(card.id);
+    if (existingGrade === undefined) {
+      added += 1;
+      operations.push({ cardId: card.id, cardName: card.name, grade });
+    } else if (existingGrade === grade) {
+      unchanged += 1;
+    } else {
+      updated += 1;
+      operations.push({ cardId: card.id, cardName: card.name, grade });
+    }
+  }
+
+  return {
+    operations,
+    added,
+    updated,
+    unchanged,
+    duplicates,
+    invalid,
+    invalidLines,
+  };
+}
+
 export function planBulkCardImport(
   text: string,
   existingNames: readonly string[],

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { errorMessage } from '../api/client';
 import type {
@@ -12,6 +12,7 @@ import {
   sortCardsAZ,
 } from '../lib/cards';
 import { analyzeAddName } from '../lib/names';
+import { addedNote } from '../lib/notes';
 import { paginate } from '../lib/pagination';
 import {
   isFilterActive,
@@ -57,7 +58,7 @@ export function CardsSection({
   const [newName, setNewName] = useState('');
   const [addError, setAddError] = useState<string | null>(null);
   const [addBusy, setAddBusy] = useState(false);
-  const [addStatusNote, setAddStatusNote] = useState<string | null>(null);
+  const [statusNote, setStatusNote] = useState<string | null>(null);
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState('');
@@ -70,12 +71,12 @@ export function CardsSection({
   const [deleteLookupId, setDeleteLookupId] = useState<number | null>(null);
 
   const [searchQuery, setSearchQuery] = useState('');
+  const searchQueryRef = useRef(searchQuery);
   const [page, setPage] = useState(1);
 
   const [bulkText, setBulkText] = useState('');
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkError, setBulkError] = useState<string | null>(null);
-  const [bulkSummary, setBulkSummary] = useState<string | null>(null);
 
   const searchActive = isFilterActive(searchQuery);
   const sortedItems = sortCardsAZ(items);
@@ -90,14 +91,14 @@ export function CardsSection({
   }, [page, paged.page]);
 
   const changeSearch = (value: string) => {
+    searchQueryRef.current = value;
     setSearchQuery(value);
     setPage(1);
-    setAddStatusNote(null);
+    setStatusNote(null);
   };
 
   const submitAdd = async (event: FormEvent) => {
     event.preventDefault();
-    setAddStatusNote(null);
     const name = newName.trim();
     if (!name) {
       setAddError('Name must not be empty.');
@@ -112,20 +113,15 @@ export function CardsSection({
       return;
     }
 
-    const hiddenBySearch =
-      isFilterActive(searchQuery) && !matchesName(name, searchQuery);
-
     setAddBusy(true);
     setAddError(null);
     try {
       await onAdd(name);
+      const query = searchQueryRef.current;
+      const hiddenBySearch = isFilterActive(query) && !matchesName(name, query);
       setNewName('');
       setPage(1);
-      setAddStatusNote(
-        hiddenBySearch
-          ? `Added “${name}”. It does not match the current search, so it is hidden.`
-          : null,
-      );
+      setStatusNote(addedNote(name, hiddenBySearch));
     } catch (caught) {
       setAddError(errorMessage(caught));
     } finally {
@@ -159,6 +155,7 @@ export function CardsSection({
     setEditError(null);
     try {
       await onRename(editingId, name);
+      setStatusNote(null);
       cancelEditing();
     } catch (caught) {
       setEditError(errorMessage(caught));
@@ -187,6 +184,7 @@ export function CardsSection({
     setDeleteError(null);
     try {
       await onDelete(deleteTarget.card.id);
+      setStatusNote(null);
       if (editingId === deleteTarget.card.id) cancelEditing();
       setDeleteTarget(null);
     } catch (caught) {
@@ -202,10 +200,9 @@ export function CardsSection({
 
     setBulkBusy(true);
     setBulkError(null);
-    setBulkSummary(null);
     try {
       const result = await onBulkImport(bulkText);
-      setBulkSummary(formatCardImportSummary(result));
+      setStatusNote(formatCardImportSummary(result));
       setPage(1);
       if (result.invalid === 0) setBulkText('');
     } catch (caught) {
@@ -231,7 +228,6 @@ export function CardsSection({
           onChange={(event) => {
             setNewName(event.target.value);
             if (addError) setAddError(null);
-            if (addStatusNote) setAddStatusNote(null);
           }}
           placeholder="e.g. Red Dragon"
           maxLength={50}
@@ -269,9 +265,9 @@ export function CardsSection({
         </p>
       )}
 
-      {addStatusNote && (
+      {statusNote && (
         <p className="muted mt-2" role="status" aria-live="polite">
-          {addStatusNote}
+          {statusNote}
         </p>
       )}
 
@@ -428,11 +424,6 @@ export function CardsSection({
         {bulkError && (
           <p className="mt-2 text-sm text-rose-600 dark:text-rose-400" role="alert">
             {bulkError}
-          </p>
-        )}
-        {bulkSummary && (
-          <p className="mt-2 text-sm text-emerald-700 dark:text-emerald-300" role="status">
-            {bulkSummary}
           </p>
         )}
       </form>

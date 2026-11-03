@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import { createTestContext } from './helpers';
 import type { TestContext } from './helpers';
@@ -324,5 +324,181 @@ describe('cards API', () => {
     await request(context!.app)
       .get('/api/cards/finder?cardId=999&grade=epic')
       .expect(404);
+  });
+});
+
+describe('character card import API', () => {
+  function importCards(characterId: number, text: string) {
+    return request(context!.app)
+      .post('/api/character-cards/import')
+      .send({ characterId, text });
+  }
+
+  it('adds, updates and reports unchanged cards', async () => {
+    setup();
+    const characterId = await addCharacter('Raven');
+    await addCard('Red Dragon');
+    await addCard('Blue Dragon');
+
+    const first = await importCards(
+      characterId,
+      'Red Dragon, Epic\nblue dragon, rare\n',
+    ).expect(200);
+    expect(first.body).toEqual({
+      added: 2,
+      updated: 0,
+      unchanged: 0,
+      duplicates: 0,
+      invalid: 0,
+      invalidLines: [],
+    });
+
+    const second = await importCards(
+      characterId,
+      'Red Dragon, Legend\nBlue Dragon, rare\n',
+    ).expect(200);
+    expect(second.body).toEqual({
+      added: 0,
+      updated: 1,
+      unchanged: 1,
+      duplicates: 0,
+      invalid: 0,
+      invalidLines: [],
+    });
+    expect(second.body).not.toHaveProperty('operations');
+
+    const cards = await getCards();
+    expect(cards.entries).toEqual([
+      {
+        characterId,
+        cardId: expect.any(Number),
+        cardName: 'Blue Dragon',
+        grade: 'rare',
+      },
+      {
+        characterId,
+        cardId: expect.any(Number),
+        cardName: 'Red Dragon',
+        grade: 'legend',
+      },
+    ]);
+  });
+
+  it('applies valid lines and returns every invalid line', async () => {
+    setup();
+    const characterId = await addCharacter('Raven');
+    await addCard('Red Dragon');
+    await addCard('Blue Dragon');
+
+    const response = await importCards(
+      characterId,
+      [
+        'Red Dragon, Mythic',
+        'No Such Card, Epic',
+        'Missing comma',
+        '',
+        'Blue Dragon, Epic',
+      ].join('\n'),
+    ).expect(200);
+
+    expect(response.body).toEqual({
+      added: 1,
+      updated: 0,
+      unchanged: 0,
+      duplicates: 0,
+      invalid: 3,
+      invalidLines: [
+        'Red Dragon, Mythic',
+        'No Such Card, Epic',
+        'Missing comma',
+      ],
+    });
+
+    const cards = await getCards();
+    expect(cards.entries).toEqual([
+      {
+        characterId,
+        cardId: expect.any(Number),
+        cardName: 'Blue Dragon',
+        grade: 'epic',
+      },
+    ]);
+  });
+
+  it('counts a later occurrence as a duplicate and lets a valid line win over an invalid one', async () => {
+    setup();
+    const characterId = await addCharacter('Raven');
+    await addCard('Red Dragon');
+
+    const response = await importCards(
+      characterId,
+      'Red Dragon, Mythic\nRed Dragon, Epic\nRed Dragon, Legend',
+    ).expect(200);
+
+    expect(response.body).toMatchObject({
+      added: 1,
+      duplicates: 1,
+      invalid: 1,
+      invalidLines: ['Red Dragon, Mythic'],
+    });
+  });
+
+  it('rejects bad ids, non-string text and unknown characters', async () => {
+    setup();
+    const characterId = await addCharacter('Raven');
+
+    await importCards(0, 'Red Dragon, Epic').expect(400);
+    await request(context!.app)
+      .post('/api/character-cards/import')
+      .send({ characterId: 'abc', text: 'Red Dragon, Epic' })
+      .expect(400);
+    await importCards(characterId, 5 as unknown as string).expect(400);
+    await request(context!.app)
+      .post('/api/character-cards/import')
+      .send({ characterId })
+      .expect(400);
+    await importCards(999, 'Red Dragon, Epic').expect(404);
+  });
+
+  it('rolls back every applied row when one upsert fails', async () => {
+    setup();
+    const characterId = await addCharacter('Raven');
+    await addCard('Red Dragon');
+    const blue = await addCard('Blue Dragon');
+
+    context!.db.exec(
+      `CREATE TRIGGER fail_character_card_insert
+       BEFORE INSERT ON character_cards
+       WHEN NEW.card_id = ${blue}
+       BEGIN
+         SELECT RAISE(ABORT, 'test rollback');
+       END;`,
+    );
+
+    const errorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    try {
+      await importCards(
+        characterId,
+        'Red Dragon, Epic\nBlue Dragon, Legend',
+      ).expect(500);
+    } finally {
+      errorSpy.mockRestore();
+    }
+
+    const rows = context!.db
+      .prepare(
+        'SELECT card_id AS cardId FROM character_cards WHERE character_id = ?',
+      )
+      .all(characterId) as Array<{ cardId: number }>;
+    expect(rows).toEqual([]);
+  });
+
+  it('keeps the default 100 KB body limit', async () => {
+    setup();
+    const characterId = await addCharacter('Raven');
+
+    await importCards(characterId, 'x'.repeat(110_000)).expect(413);
   });
 });

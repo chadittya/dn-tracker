@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { errorMessage } from '../api/client';
 import { analyzeAddName } from '../lib/names';
+import { addedNote } from '../lib/notes';
 import { sortEntitiesForManage } from '../lib/ordering';
 import { paginate } from '../lib/pagination';
 import {
@@ -64,8 +65,9 @@ export function EntitySection({
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const [searchQuery, setSearchQuery] = useState('');
+  const searchQueryRef = useRef(searchQuery);
   const [page, setPage] = useState(1);
-  const [addStatusNote, setAddStatusNote] = useState<string | null>(null);
+  const [statusNote, setStatusNote] = useState<string | null>(null);
 
   const searchActive = isFilterActive(searchQuery);
   const sortedItems = sortEntitiesForManage(items);
@@ -82,14 +84,14 @@ export function EntitySection({
   }, [page, paged.page]);
 
   const changeSearch = (value: string) => {
+    searchQueryRef.current = value;
     setSearchQuery(value);
     setPage(1);
-    setAddStatusNote(null);
+    setStatusNote(null);
   };
 
   const submitAdd = async (event: FormEvent) => {
     event.preventDefault();
-    setAddStatusNote(null);
     const name = newName.trim();
     if (!name) {
       setAddError('Name must not be empty.');
@@ -104,20 +106,15 @@ export function EntitySection({
       return;
     }
 
-    const hiddenBySearch =
-      isFilterActive(searchQuery) && !matchesName(name, searchQuery);
-
     setAddBusy(true);
     setAddError(null);
     try {
       await onAdd(name);
+      const query = searchQueryRef.current;
+      const hiddenBySearch = isFilterActive(query) && !matchesName(name, query);
       setNewName('');
       setPage(1);
-      setAddStatusNote(
-        hiddenBySearch
-          ? `Added “${name}”. It does not match the current search, so it is hidden.`
-          : null,
-      );
+      setStatusNote(addedNote(name, hiddenBySearch));
     } catch (caught) {
       setAddError(errorMessage(caught));
     } finally {
@@ -151,6 +148,7 @@ export function EntitySection({
     setEditError(null);
     try {
       await onRename(editingId, name);
+      setStatusNote(null);
       cancelEditing();
     } catch (caught) {
       setEditError(errorMessage(caught));
@@ -166,6 +164,7 @@ export function EntitySection({
     setDeleteError(null);
     try {
       await onDelete(deleteTarget.id);
+      setStatusNote(null);
       setDeleteTarget(null);
       if (editingId === deleteTarget.id) cancelEditing();
     } catch (caught) {
@@ -189,7 +188,6 @@ export function EntitySection({
           onChange={(event) => {
             setNewName(event.target.value);
             if (addError) setAddError(null);
-            if (addStatusNote) setAddStatusNote(null);
           }}
           placeholder={placeholder}
           maxLength={50}
@@ -227,9 +225,9 @@ export function EntitySection({
         </p>
       )}
 
-      {addStatusNote && (
+      {statusNote && (
         <p className="muted mt-2" role="status" aria-live="polite">
-          {addStatusNote}
+          {statusNote}
         </p>
       )}
 

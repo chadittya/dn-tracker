@@ -7,6 +7,11 @@
     Roboto, sans-serif;
 }
 
+:root {
+  /* Replaced at runtime by AppShell with the real header height. */
+  --app-header-height: 5rem;
+}
+
 html {
   color-scheme: light;
 }
@@ -21,6 +26,10 @@ body {
 
 #root {
   @apply min-h-screen;
+}
+
+.manage-section-anchor {
+  scroll-margin-top: calc(var(--app-header-height) + 1.5rem);
 }
 
 ::selection {

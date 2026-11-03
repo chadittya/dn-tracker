@@ -2,8 +2,11 @@ import type {
   CardBulkImportResult,
   CardCatalogEntry,
   CharacterCardEntry,
+  CharacterCardImportResult,
 } from '../api/types';
 import { foldName } from './names';
+import { paginate } from './pagination';
+import type { PagedItems } from './pagination';
 import { filterByName } from './search';
 
 export interface CardOption {
@@ -98,4 +101,57 @@ export function formatCardImportSummary(
   return `${base} ${result.invalid} invalid line${
     result.invalid === 1 ? '' : 's'
   } not added.`;
+}
+
+export interface CharacterCardList {
+  owned: CharacterCardEntry[];
+  filtered: CharacterCardEntry[];
+  paged: PagedItems<CharacterCardEntry>;
+}
+
+/**
+ * Sort the character's cards A to Z, filter them by name over the whole owned
+ * list, then paginate. PAGE_SIZE comes from `paginate`.
+ */
+export function buildCharacterCardList(
+  entries: readonly CharacterCardEntry[],
+  characterId: number,
+  query: string,
+  page: number,
+): CharacterCardList {
+  const owned = sortCharacterCardEntries(
+    entries.filter((entry) => entry.characterId === characterId),
+  );
+  const filtered = filterCharacterCards(owned, query);
+  return { owned, filtered, paged: paginate(filtered, page) };
+}
+
+export function formatCharacterCardImportSummary(
+  result: CharacterCardImportResult,
+): string {
+  const clauses = [
+    result.added > 0 ? `added ${result.added}` : null,
+    result.updated > 0 ? `updated ${result.updated}` : null,
+    result.unchanged > 0 ? `unchanged ${result.unchanged}` : null,
+  ].filter((clause): clause is string => clause !== null);
+
+  const parts =
+    clauses.length === 0
+      ? ['Imported: nothing changed.']
+      : [`Imported: ${clauses.join(', ')}.`];
+
+  if (result.duplicates > 0) {
+    parts.push(
+      `${result.duplicates} duplicate line${
+        result.duplicates === 1 ? '' : 's'
+      } skipped.`,
+    );
+  }
+  if (result.invalid > 0) {
+    parts.push(
+      `${result.invalid} line${result.invalid === 1 ? '' : 's'} not added.`,
+    );
+  }
+
+  return parts.join(' ');
 }

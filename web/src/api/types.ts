@@ -240,6 +240,15 @@ export interface CardBulkImportResult {
   invalid: number;
 }
 
+export interface CharacterCardImportResult {
+  added: number;
+  updated: number;
+  unchanged: number;
+  duplicates: number;
+  invalid: number;
+  invalidLines: string[];
+}
+
 export interface AppState {
   weekKey: string;
   weekStartAt: string;

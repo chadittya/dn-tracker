@@ -53,6 +53,12 @@ Local-only web app to track which characters have run which nests this week, plu
 - The pagination footer shows only when the filtered count is above 10. The Manage filter note reads "Filtered to X of N ...".
 - This ordering and pagination apply to the Manage lists only. The existing API block orders and the other tabs are unchanged; the cards block is A to Z as described in Cards.
 
+### Manage notes and layout (v3.3.1)
+
+- Page order: Characters, Nests, Plates, Plate levels, Engraving values, Cards. On large screens a sticky sidebar (`ManageSidebar`, buttons, not hash anchors) smooth-scrolls to each section and highlights the section in view; below `lg` it is a scrollable chip row. Scroll targets use `scroll-margin-top` based on `--app-header-height`, published by `AppShell` and defaulting to `5rem`.
+- Each Manage list (Characters, Nests, Plates, Plate levels, Cards) has one success-note slot: `Added {name}.` or `Added {name}. It is hidden by your current search.`; plate levels use `Added Level {value}.`. The Cards bulk-import summary shares the slot. The note is replaced on the next add, rename, delete or search change, and is cleared on leaving the tab. Typing in an input does not clear it. Plate levels keep the amber rank-shift warning as a separate box.
+- Engraving value grades are collapsible sections: all four grades render when the category has values (including zero-value grades); an entirely empty category keeps its single empty message. Sections start closed, keep their open state per category while Manage stays mounted, and are never collapsed by add, edit or delete. The add-value form and its errors stay above the grade sections.
+
 ### Heraldry (v3.1)
 
 - Every character has `HERALDRY_SLOT_COUNT = 8` heraldry slots. Each filled slot stores one plate, its plate level, rarity (`rare` or `epic`), and whether it has a third stat.
@@ -82,7 +88,7 @@ Local-only web app to track which characters have run which nests this week, plu
 - Finder: given a slot and a value, lists characters whose slot is empty or lower. Order: empty first, then lowest, then name. Results are informational only (no click action).
 - Export/import behavior is described in "Export and import" below.
 
-### Cards (v3.3)
+### Cards (v3.3, amended in v3.3.1)
 
 - Cards are a catalog of card names maintained in Manage. Each character has zero or one entry per card; an entry is the card plus a grade. There is no slot count, no card stats and no value tracking, only name and grade.
 - Cards are persistent: no `week_key`, no weekly status.
@@ -91,8 +97,13 @@ Local-only web app to track which characters have run which nests this week, plu
 - Lower-than: the character has no entry for the card, or the entry's grade is below the target grade. Equal or higher is not lower.
 - Finder: given a card and a target grade, lists characters who are missing the card or have it below the target grade. Order: missing first, then lowest grade, then name. Results are informational only (no click action). Both the card picker in the finder and the one in the character panel are searchable combo boxes ("contains", case-insensitive).
 - Changing a character's grade for a card allows any of the 5 grades, up or down. Adding a card to a character has no default grade (Save stays disabled until card and grade are chosen); cards the character already has are hidden in the add picker.
-- Removing a card from a character is immediate, with no confirmation. The panel then shows an info note (for example "Removed Red Dragon from Aria") that stays until the next action in the panel (add, change, remove, or closing the panel). The endpoint is idempotent.
-- Cards tab: finder on top, then a character list (search by name, "Cards: N / total" per row, one Clear filters). Clicking a character opens a side panel (dialog on narrow screens), one character at a time. The panel lists that character's cards A to Z with its own search box and "N of M cards" while filtering.
+- Removing a card from a character is immediate, with no confirmation. The panel then shows an info note (for example "Removed Red Dragon from Aria.") that stays until the next action in the panel (add, change, remove, import, panel search change, or closing the panel). Opening or cancelling the grade editor does not clear it. The endpoint is idempotent.
+- Cards tab: finder on top, then a character list (search by name, "Cards: N / total" per row, one Clear filters). Clicking a character opens a side panel (dialog on narrow screens), one character at a time.
+- Panel layout order: header and count, note and error, Add card + Import cards block, card search, paginated list. The list shows that character's cards A to Z, 10 per page (`PAGE_SIZE`), with `filtered of owned cards` while filtering. The footer shows only above 10. Page resets on search change, add and import; change grade and remove keep the page, clamped. All panel note text lives in `web/src/lib/notes.ts` and `formatCharacterCardImportSummary`.
+- Panel notes: add `Added {card}.` (plus the hidden-by-search variant), change `Changed {card} to {Grade}.`, remove `Removed {card} from {character}.`, and the import summary. One slot; add, change, remove, import, panel search change, or closing the panel replaces it.
+- Panel import: `Import cards` expands an inline textarea below the add form. Hint `One card per line: Card name, Grade`. Split each line on the LAST comma and trim both sides; card names and grade labels match ASCII case-insensitively (`Magic`, `Rare`, `Epic`, `Unique`, `Legend`). Empty lines are ignored. A line is invalid for no comma, an empty name or grade, an unknown card, or an unknown grade. A valid line claims its card; later lines for that card are duplicates and skipped, even if malformed. An invalid line does not claim its card, so a later valid line for it is applied. Absent card = added, same grade = unchanged, different grade = updated (overwritten). Valid operations apply in one transaction. Invalid lines stay in the textarea with duplicates removed; re-importing one later overwrites a grade that a later valid line applied for the same card. Import is disabled for blank text and the entry point is hidden when the catalog is empty.
+- While the import textarea has non-whitespace text, Escape, a backdrop click and the close button do not close the panel; only Cancel clears the textarea. When it is empty, normal close behavior applies.
+- Import summary: `Imported: added N, updated N, unchanged N.` with zero clauses omitted; all zero gives `Imported: nothing changed.`; then append `N duplicate line(s) skipped.` and `N line(s) not added.`
 - Deleting a card removes it from every character who has it (cascade). The confirmation shows the count from `GET /api/cards/:id/usage`, for example "12 characters have this card and it will be removed from them". Renaming a card keeps every character's grade.
 - Bulk import (Manage): paste names, one per line. Lines are trimmed, empty lines are ignored silently, names over 50 characters are invalid, and names that already exist or are duplicated inside the paste (case-insensitive) are skipped. Valid lines are always added; a paste is never rejected as a whole. The result is a summary only, for example "Added 12, skipped 79 already existing" plus "N invalid lines not added" when relevant.
 - Dashboard is untouched by cards.
@@ -117,6 +128,7 @@ Local-only web app to track which characters have run which nests this week, plu
 - Versions 1 and 2 clear all character engraving but keep the current engraving value tables; versions 3 and 4 replace both engraving values and character engraving from the file.
 - Versions 1, 2 and 3 have no card data: importing one KEEPS the current card catalog and CLEARS every character's cards. The confirmation dialog says so.
 - Import result counts include `engravingValues`, `engravingSlots`, `cards` and `cardSlots` (older versions report 0 for data they do not contain).
+- v3.3.1 changes none of this: export stays `version: 4`, and the per-character card import is a separate API endpoint, not part of the JSON backup format.
 
 ## Database rules
 
@@ -131,7 +143,7 @@ Local-only web app to track which characters have run which nests this week, plu
 - character_cards (migration 4): `character_id` FK ON DELETE CASCADE, `card_id` FK ON DELETE CASCADE, `grade` CHECK in (magic, rare, epic, unique, legend), PRIMARY KEY (character_id, card_id), index on `card_id`.
 - `PRAGMA foreign_keys = ON`, WAL mode. Character, plate and card references use `ON DELETE CASCADE`; `character_heraldry.level` and `character_engraving.value_id` use `ON DELETE RESTRICT`.
 - Names use `COLLATE NOCASE` with a UNIQUE constraint.
-- Schema changes only via ordered migrations tracked with `PRAGMA user_version` (currently 4 after v3.3). Migrations run automatically on server start, inside a transaction. NEVER edit migrations 1, 2, 3 or 4 once shipped; any schema change needs a new migration. The server refuses to start on a newer schema.
+- Schema changes only via ordered migrations tracked with `PRAGMA user_version` (currently 4 after v3.3; v3.3.1 adds no migration). Migrations run automatically on server start, inside a transaction. NEVER edit migrations 1, 2, 3 or 4 once shipped; any schema change needs a new migration. The server refuses to start on a newer schema.
 - Before the first start after a schema change, the client copies the whole `data/` folder.
 - Use parameterized queries only. Never build SQL with string concatenation.
 
@@ -141,7 +153,7 @@ Local-only web app to track which characters have run which nests this week, plu
 - Core: `POST/PATCH/DELETE /api/characters[/:id]`, `POST/PATCH/DELETE /api/nests[/:id]`, `PUT /api/runs`.
 - Heraldry: `POST/DELETE /api/heraldry/levels[/:value]`, `POST/PATCH/DELETE /api/heraldry/plates[/:id]`, `PUT /api/heraldry/slots`, `DELETE /api/heraldry/slots/:characterId/:slot`, `POST /api/heraldry/copy`.
 - Engraving: `/api/engraving/values` (POST, PATCH/:id, DELETE/:id, GET/:id/usage), `GET /api/engraving/finder?slot=&valueId=`, `PUT /api/engraving/slots`, `DELETE /api/engraving/slots/:characterId/:slot`.
-- Cards: `POST/PATCH/DELETE /api/cards[/:id]`, `GET /api/cards/:id/usage`, `POST /api/cards/import` (body `{ text }`, one name per line, default 100 KB body limit), `GET /api/cards/finder?cardId=&grade=`, `PUT /api/character-cards`, `DELETE /api/character-cards/:characterId/:cardId` (idempotent; 404 only for an unknown character).
+- Cards: `POST/PATCH/DELETE /api/cards[/:id]`, `GET /api/cards/:id/usage`, `POST /api/cards/import` (body `{ text }`, one name per line, default 100 KB body limit), `GET /api/cards/finder?cardId=&grade=`, `PUT /api/character-cards`, `POST /api/character-cards/import` (body `{ characterId, text }`, one `Card name, Grade` per line, default 100 KB body limit; 400 for a bad id or non-string text, 404 for an unknown character; returns `{ added, updated, unchanged, duplicates, invalid, invalidLines }`), `DELETE /api/character-cards/:characterId/:cardId` (idempotent; 404 only for an unknown character).
 - Backups and data: `GET /api/backups`, `GET /api/data/export`, `POST /api/data/import`.
 - Errors use `{ error: { code, message } }` with optional `details`. Unknown `/api/*` returns a JSON 404.
 
@@ -160,7 +172,7 @@ Local-only web app to track which characters have run which nests this week, plu
 - The API returns `weekKey` and `nextResetAt`; the frontend uses these and never recomputes week boundaries itself.
 - Server binds to 127.0.0.1 only. Dev serves Vite through the same HTTP server on port 3000; no second port is opened.
 - Dev uses `data-dev/` by default (override with `DN_DATA_DIR`); production uses `data/`.
-- UI components contain no business logic; use hooks and an API client module. Pure web helpers live in `web/src/lib/` (search, names, dashboard, heraldry, engraving, cards, navigation, ordering, pagination).
+- UI components contain no business logic; use hooks and an API client module. Pure web helpers live in `web/src/lib/` (search, names, notes, dashboard, heraldry, engraving, cards, navigation, ordering, pagination, manage sections).
 - Validate all API input. Return consistent JSON errors. The JSON import route accepts up to 25 MB; all other routes keep Express's default body limit.
 - Keep dependencies minimal. Ask before adding any new dependency.
 - Do not guess unspecified requirements: list them under "Open questions" in the report instead of inventing behavior.

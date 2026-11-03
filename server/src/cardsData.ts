@@ -1,8 +1,9 @@
 import type Database from 'better-sqlite3';
-import { buildCardsState } from './cards';
+import { buildCardsState, planCharacterCardImport } from './cards';
 import type {
   CardRow,
   CardsState,
+  CharacterCardImportPlan,
   CharacterCardRow,
 } from './cards';
 import type { CharacterRow } from './progress';
@@ -51,4 +52,40 @@ export function readCardsState(
     readCards(db),
     readCharacterCards(db),
   );
+}
+
+/**
+ * Plan and apply a `Card name, Grade` import for one character in a single
+ * transaction. Reading the catalog and existing rows inside the transaction
+ * keeps the plan and the writes consistent; any failure rolls everything back.
+ */
+export function importCharacterCards(
+  db: Database.Database,
+  characterId: number,
+  text: string,
+): CharacterCardImportPlan {
+  const run = db.transaction(() => {
+    const plan = planCharacterCardImport(
+      text,
+      readCards(db),
+      characterId,
+      readCharacterCards(db),
+    );
+
+    if (plan.operations.length === 0) return plan;
+
+    const upsert = db.prepare(
+      `INSERT INTO character_cards (character_id, card_id, grade)
+       VALUES (?, ?, ?)
+       ON CONFLICT(character_id, card_id) DO UPDATE SET
+         grade = excluded.grade`,
+    );
+    for (const operation of plan.operations) {
+      upsert.run(characterId, operation.cardId, operation.grade);
+    }
+
+    return plan;
+  });
+
+  return run();
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, errorMessage } from '../api/client';
 import type {
   CardGrade,
@@ -8,14 +8,20 @@ import type {
 } from '../api/types';
 import {
   buildCardOptions,
-  filterCharacterCards,
+  buildCharacterCardList,
   formatCardCount,
-  sortCharacterCardEntries,
+  formatCharacterCardImportSummary,
 } from '../lib/cards';
-import { isFilterActive } from '../lib/search';
+import { isFilterActive, matchesName } from '../lib/search';
 import { CARD_GRADE_COLORS } from '../lib/engravingColors';
+import {
+  addedNote,
+  changedCardGradeNote,
+  removedCardNote,
+} from '../lib/notes';
 import { CardGradeBadge } from './CardGradeBadge';
 import { ComboBox } from './ComboBox';
+import { Pagination } from './Pagination';
 import { SearchField } from './SearchField';
 
 function GradeButtons({
@@ -65,6 +71,8 @@ export function CardCharacterPanel({
   onChanged: () => Promise<void>;
 }) {
   const [cardQuery, setCardQuery] = useState('');
+  const cardQueryRef = useRef(cardQuery);
+  const [cardPage, setCardPage] = useState(1);
   const [addCardId, setAddCardId] = useState<number | null>(null);
   const [addGrade, setAddGrade] = useState<CardGrade | null>(null);
   const [editingCardId, setEditingCardId] = useState<number | null>(null);
@@ -73,10 +81,20 @@ export function CardCharacterPanel({
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
-  const ownedEntries = sortCharacterCardEntries(
-    cards.entries.filter((entry) => entry.characterId === character.id),
+  const [importOpen, setImportOpen] = useState(false);
+  const [importText, setImportText] = useState('');
+  const [importError, setImportError] = useState<string | null>(null);
+
+  const {
+    owned: ownedEntries,
+    filtered: visibleEntries,
+    paged,
+  } = buildCharacterCardList(
+    cards.entries,
+    character.id,
+    cardQuery,
+    cardPage,
   );
-  const visibleEntries = filterCharacterCards(ownedEntries, cardQuery);
   const filterActive = isFilterActive(cardQuery);
   const ownedIds = new Set(ownedEntries.map((entry) => entry.cardId));
   const addOptions = buildCardOptions(cards.catalog, ownedIds);
@@ -86,6 +104,14 @@ export function CardCharacterPanel({
   const summary = cards.perCharacter.find(
     (item) => item.characterId === character.id,
   );
+  const importHasText = importOpen && importText.trim() !== '';
+
+  const gradeLabel = (grade: CardGrade): string =>
+    cards.grades.find((item) => item.key === grade)?.label ?? grade;
+
+  useEffect(() => {
+    if (cardPage !== paged.page) setCardPage(paged.page);
+  }, [cardPage, paged.page]);
 
   useEffect(() => {
     if (
@@ -99,32 +125,57 @@ export function CardCharacterPanel({
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
-      if (event.key === 'Escape' && !busy) onClose();
+      if (event.key === 'Escape' && !busy && !importHasText) onClose();
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [busy, onClose]);
+  }, [busy, importHasText, onClose]);
+
+  const changeCardSearch = (value: string) => {
+    cardQueryRef.current = value;
+    setCardQuery(value);
+    setCardPage(1);
+    setNote(null);
+  };
+
+  const resetImport = () => {
+    setImportOpen(false);
+    setImportText('');
+    setImportError(null);
+  };
+
+  const toggleImport = () => {
+    if (importOpen) {
+      resetImport();
+      return;
+    }
+    setImportError(null);
+    setImportOpen(true);
+  };
 
   const startEditing = (entry: CharacterCardEntry) => {
     if (busy) return;
     setEditingCardId(entry.cardId);
     setEditingGrade(entry.grade);
-    setNote(null);
     setError(null);
   };
 
   const saveGrade = async () => {
-    if (editingCardId === null || editingGrade === null) return;
+    if (editingCardId === null || editingGrade === null || !editingEntry) {
+      return;
+    }
+    const cardName = editingEntry.cardName;
+    const grade = editingGrade;
     setBusy(true);
     setError(null);
     try {
       await api.setCharacterCard({
         characterId: character.id,
         cardId: editingCardId,
-        grade: editingGrade,
+        grade,
       });
       await onChanged();
-      setNote(null);
+      setNote(changedCardGradeNote(cardName, gradeLabel(grade)));
       setEditingCardId(null);
       setEditingGrade(null);
     } catch (caught) {
@@ -140,7 +191,7 @@ export function CardCharacterPanel({
     try {
       await api.removeCharacterCard(character.id, entry.cardId);
       await onChanged();
-      setNote(`Removed ${entry.cardName} from ${character.name}`);
+      setNote(removedCardNote(entry.cardName, character.name));
       setEditingCardId(null);
       setEditingGrade(null);
     } catch (caught) {
@@ -155,17 +206,47 @@ export function CardCharacterPanel({
     setBusy(true);
     setError(null);
     try {
-      await api.setCharacterCard({
+      const response = await api.setCharacterCard({
         characterId: character.id,
         cardId: addCardId,
         grade: addGrade,
       });
+      const query = cardQueryRef.current;
+      const hiddenBySearch =
+        isFilterActive(query) &&
+        !matchesName(response.entry.cardName, query);
       await onChanged();
-      setNote(null);
+      setNote(addedNote(response.entry.cardName, hiddenBySearch));
+      setCardPage(1);
       setAddCardId(null);
       setAddGrade(null);
     } catch (caught) {
       setError(errorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const importCards = async () => {
+    if (importText.trim() === '') return;
+    setBusy(true);
+    setImportError(null);
+    try {
+      const result = await api.importCharacterCards(
+        character.id,
+        importText,
+      );
+      await onChanged();
+      setNote(formatCharacterCardImportSummary(result));
+      setCardPage(1);
+      if (result.invalid === 0) {
+        resetImport();
+      } else {
+        setImportText(result.invalidLines.join('\n'));
+        setImportError(null);
+      }
+    } catch (caught) {
+      setImportError(errorMessage(caught));
     } finally {
       setBusy(false);
     }
@@ -176,7 +257,13 @@ export function CardCharacterPanel({
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm sm:items-stretch sm:justify-end sm:p-0"
       role="presentation"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !busy) onClose();
+        if (
+          event.target === event.currentTarget &&
+          !busy &&
+          !importHasText
+        ) {
+          onClose();
+        }
       }}
     >
       <div
@@ -198,7 +285,7 @@ export function CardCharacterPanel({
             type="button"
             className="btn btn-ghost -mt-2 -mr-2 min-h-10 px-3 text-xl"
             onClick={onClose}
-            disabled={busy}
+            disabled={busy || importHasText}
             aria-label="Close card panel"
           >
             ×
@@ -220,10 +307,123 @@ export function CardCharacterPanel({
           </p>
         )}
 
-        <div className="mt-4">
+        <section className="mt-5 border-t border-slate-200 pt-4 dark:border-slate-800">
+          <h3 className="text-sm font-semibold">Add a card</h3>
+          {cards.catalog.length === 0 ? (
+            <p className="muted mt-2 rounded-xl border border-dashed border-slate-300 px-3 py-3 text-sm dark:border-slate-700">
+              No cards in the catalog yet. Add cards in Manage.
+            </p>
+          ) : (
+            <>
+              {addOptions.length === 0 ? (
+                <p className="muted mt-2 text-sm">
+                  {character.name} already has every card in the catalog.
+                </p>
+              ) : (
+                <>
+                  <ComboBox
+                    label={`Add a card to ${character.name}`}
+                    placeholder="Search cards"
+                    options={addOptions}
+                    value={addCardId}
+                    onChange={setAddCardId}
+                    emptyText="No matching cards."
+                    disabled={busy}
+                    className="mt-2"
+                  />
+                  <div className="mt-3">
+                    <span className="text-sm font-medium">Grade</span>
+                    <GradeButtons
+                      value={addGrade}
+                      onChange={setAddGrade}
+                      disabled={busy}
+                      label="New card grade"
+                    />
+                  </div>
+                </>
+              )}
+
+              <div className="mt-3 flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={toggleImport}
+                  disabled={busy}
+                  aria-expanded={importOpen}
+                  aria-controls="card-import-form"
+                >
+                  Import cards
+                </button>
+                {addOptions.length > 0 && (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => void addCard()}
+                    disabled={busy || addCardId === null || addGrade === null}
+                  >
+                    {busy ? 'Saving…' : 'Add card'}
+                  </button>
+                )}
+              </div>
+
+              {importOpen && (
+                <div
+                  id="card-import-form"
+                  className="mt-3 rounded-xl border border-slate-200 p-3 dark:border-slate-800"
+                >
+                  <label
+                    htmlFor="card-import-text"
+                    className="text-sm font-medium"
+                  >
+                    One card per line: Card name, Grade
+                  </label>
+                  <textarea
+                    id="card-import-text"
+                    className="input mt-2 min-h-28 w-full"
+                    value={importText}
+                    onChange={(event) => {
+                      setImportText(event.target.value);
+                      if (importError) setImportError(null);
+                    }}
+                    placeholder={'Red Dragon, Epic\nBlue Dragon, Rare'}
+                    disabled={busy}
+                  />
+                  {importError && (
+                    <p
+                      className="mt-2 text-sm text-rose-600 dark:text-rose-400"
+                      role="alert"
+                    >
+                      {importError}
+                    </p>
+                  )}
+                  <div className="mt-2 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={resetImport}
+                      disabled={busy}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => void importCards()}
+                      disabled={busy || importText.trim() === ''}
+                    >
+                      {busy ? 'Importing…' : 'Import'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </section>
+
+        <div className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
           <SearchField
             value={cardQuery}
-            onChange={setCardQuery}
+            onChange={changeCardSearch}
             placeholder="Search this character's cards"
             label="Search this character's cards"
           />
@@ -243,116 +443,81 @@ export function CardCharacterPanel({
             No cards match “{cardQuery.trim()}”.
           </p>
         ) : (
-          <ul className="mt-3 divide-y divide-slate-200 dark:divide-slate-800">
-            {visibleEntries.map((entry) => (
-              <li key={entry.cardId} className="py-2">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <button
-                    type="button"
-                    className="min-h-10 flex-1 text-left font-medium"
-                    onClick={() => startEditing(entry)}
-                    disabled={busy}
-                  >
-                    {entry.cardName}
-                  </button>
-                  <span className="flex items-center gap-2">
-                    <CardGradeBadge grade={entry.grade} />
+          <>
+            <ul className="mt-3 divide-y divide-slate-200 dark:divide-slate-800">
+              {paged.items.map((entry) => (
+                <li key={entry.cardId} className="py-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <button
                       type="button"
-                      className="btn min-h-9 px-2 text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40"
-                      onClick={() => void removeCard(entry)}
+                      className="min-h-10 flex-1 text-left font-medium"
+                      onClick={() => startEditing(entry)}
                       disabled={busy}
                     >
-                      Remove
+                      {entry.cardName}
                     </button>
-                  </span>
-                </div>
-
-                {editingEntry?.cardId === entry.cardId && (
-                  <div className="mt-2 rounded-xl border border-slate-200 p-3 dark:border-slate-800">
-                    <span className="text-sm font-medium">Change grade</span>
-                    <GradeButtons
-                      value={editingGrade}
-                      onChange={setEditingGrade}
-                      disabled={busy}
-                      label={`Change grade for ${entry.cardName}`}
-                    />
-                    <div className="mt-3 flex justify-end gap-2">
+                    <span className="flex items-center gap-2">
+                      <CardGradeBadge grade={entry.grade} />
                       <button
                         type="button"
-                        className="btn btn-secondary min-h-9 px-3"
-                        onClick={() => {
-                          setEditingCardId(null);
-                          setEditingGrade(null);
-                        }}
+                        className="btn min-h-9 px-2 text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40"
+                        onClick={() => void removeCard(entry)}
                         disabled={busy}
                       >
-                        Cancel
+                        Remove
                       </button>
-                      <button
-                        type="button"
-                        className="btn btn-primary min-h-9 px-3"
-                        onClick={() => void saveGrade()}
-                        disabled={
-                          busy ||
-                          editingGrade === null ||
-                          editingGrade === entry.grade
-                        }
-                      >
-                        {busy ? 'Saving…' : 'Save grade'}
-                      </button>
-                    </div>
+                    </span>
                   </div>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
 
-        <section className="mt-5 border-t border-slate-200 pt-4 dark:border-slate-800">
-          <h3 className="text-sm font-semibold">Add a card</h3>
-          {cards.catalog.length === 0 ? (
-            <p className="muted mt-2 rounded-xl border border-dashed border-slate-300 px-3 py-3 text-sm dark:border-slate-700">
-              No cards in the catalog yet. Add cards in Manage.
-            </p>
-          ) : addOptions.length === 0 ? (
-            <p className="muted mt-2 text-sm">
-              {character.name} already has every card in the catalog.
-            </p>
-          ) : (
-            <>
-              <ComboBox
-                label={`Add a card to ${character.name}`}
-                placeholder="Search cards"
-                options={addOptions}
-                value={addCardId}
-                onChange={setAddCardId}
-                emptyText="No matching cards."
-                disabled={busy}
-                className="mt-2"
-              />
-              <div className="mt-3">
-                <span className="text-sm font-medium">Grade</span>
-                <GradeButtons
-                  value={addGrade}
-                  onChange={setAddGrade}
-                  disabled={busy}
-                  label="New card grade"
-                />
-              </div>
-              <div className="mt-3 flex justify-end">
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={() => void addCard()}
-                  disabled={busy || addCardId === null || addGrade === null}
-                >
-                  {busy ? 'Saving…' : 'Add card'}
-                </button>
-              </div>
-            </>
-          )}
-        </section>
+                  {editingEntry?.cardId === entry.cardId && (
+                    <div className="mt-2 rounded-xl border border-slate-200 p-3 dark:border-slate-800">
+                      <span className="text-sm font-medium">Change grade</span>
+                      <GradeButtons
+                        value={editingGrade}
+                        onChange={setEditingGrade}
+                        disabled={busy}
+                        label={`Change grade for ${entry.cardName}`}
+                      />
+                      <div className="mt-3 flex justify-end gap-2">
+                        <button
+                          type="button"
+                          className="btn btn-secondary min-h-9 px-3"
+                          onClick={() => {
+                            setEditingCardId(null);
+                            setEditingGrade(null);
+                          }}
+                          disabled={busy}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-primary min-h-9 px-3"
+                          onClick={() => void saveGrade()}
+                          disabled={
+                            busy ||
+                            editingGrade === null ||
+                            editingGrade === entry.grade
+                          }
+                        >
+                          {busy ? 'Saving…' : 'Save grade'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+
+            <Pagination
+              summary={paged}
+              itemPlural="cards"
+              label={`${character.name} cards`}
+              onPrevious={() => setCardPage(paged.page - 1)}
+              onNext={() => setCardPage(paged.page + 1)}
+            />
+          </>
+        )}
       </div>
     </div>
   );

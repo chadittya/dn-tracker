@@ -13,7 +13,11 @@ import type {
   CardRow,
   CharacterCardEntry,
 } from '../cards';
-import { readCards, readCharacterCards } from '../cardsData';
+import {
+  importCharacterCards,
+  readCards,
+  readCharacterCards,
+} from '../cardsData';
 import type { CharacterRow } from '../progress';
 import {
   parseId,
@@ -204,6 +208,28 @@ export function createCharacterCardsRouter(db: Database.Database): Router {
       grade,
     };
     res.json({ entry });
+  });
+
+  router.post('/import', (req, res) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const characterId = parseId(body.characterId, 'characterId');
+
+    if (typeof body.text !== 'string') {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'text must be a string.');
+    }
+    if (!selectCharacter.get(characterId)) {
+      throw new ApiError(404, 'NOT_FOUND', 'Character not found.');
+    }
+
+    const plan = importCharacterCards(db, characterId, body.text);
+    res.json({
+      added: plan.added,
+      updated: plan.updated,
+      unchanged: plan.unchanged,
+      duplicates: plan.duplicates,
+      invalid: plan.invalid,
+      invalidLines: plan.invalidLines,
+    });
   });
 
   router.delete('/:characterId/:cardId', (req, res) => {

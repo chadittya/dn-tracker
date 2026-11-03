@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { useAppState } from '../state/context';
 import { TABS } from '../lib/navigation';
@@ -16,10 +17,38 @@ export function AppShell({
   children: ReactNode;
 }) {
   const { error, clearError } = useAppState();
+  const headerRef = useRef<HTMLElement | null>(null);
+
+  useLayoutEffect(() => {
+    const header = headerRef.current;
+    if (!header) return;
+
+    const root = document.documentElement;
+    const publishHeight = () => {
+      root.style.setProperty(
+        '--app-header-height',
+        `${header.getBoundingClientRect().height}px`,
+      );
+    };
+
+    publishHeight();
+    const observer = new ResizeObserver(publishHeight);
+    observer.observe(header);
+    window.addEventListener('resize', publishHeight);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', publishHeight);
+      root.style.removeProperty('--app-header-height');
+    };
+  }, []);
 
   return (
     <div className="min-h-screen">
-      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/85 backdrop-blur dark:border-slate-800 dark:bg-slate-950/85">
+      <header
+        ref={headerRef}
+        className="sticky top-0 z-40 border-b border-slate-200 bg-white/85 backdrop-blur dark:border-slate-800 dark:bg-slate-950/85"
+      >
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-600 text-sm font-black text-white">

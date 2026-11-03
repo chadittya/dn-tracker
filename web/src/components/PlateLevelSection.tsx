@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { ApiRequestError, errorMessage } from '../api/client';
 import type { HeraldryAffectedSlot } from '../api/types';
+import { addedLevelNote } from '../lib/notes';
 import { sortLevelsDesc } from '../lib/ordering';
 import { paginate } from '../lib/pagination';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -21,6 +22,7 @@ export function PlateLevelSection({
   const [newValue, setNewValue] = useState('');
   const [addBusy, setAddBusy] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+  const [statusNote, setStatusNote] = useState<string | null>(null);
   const [rankShiftNote, setRankShiftNote] = useState<string | null>(null);
 
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
@@ -64,6 +66,7 @@ export function PlateLevelSection({
       await onAdd(parsed);
       setNewValue('');
       setPage(1);
+      setStatusNote(addedLevelNote(parsed));
       if (previousCap !== null && parsed < previousCap) {
         setRankShiftNote(
           `Level ${parsed} was added below the cap (${previousCap}). Ranks shifted and all slot statuses were recalculated.`,
@@ -93,6 +96,7 @@ export function PlateLevelSection({
     setDeleteError(null);
     try {
       await onDelete(deleted);
+      setStatusNote(null);
       setDeleteTarget(null);
       setAffectedSlots([]);
       setAffectedCount(0);
@@ -185,6 +189,12 @@ export function PlateLevelSection({
           role="alert"
         >
           {addError}
+        </p>
+      )}
+
+      {statusNote && (
+        <p className="muted mt-2" role="status" aria-live="polite">
+          {statusNote}
         </p>
       )}
 

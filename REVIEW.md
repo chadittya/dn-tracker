@@ -1118,3 +1118,197 @@ npm test       234 passed across 20 test files
 npm run lint   passed, no errors or warnings
 npm run build  passed server/dev/web typechecks and Vite production build
 ```
+
+---
+
+# Review — Dragon Nest Run Tracker v3.3.1 Cards and Manage usability
+
+## 1. Summary
+
+v3.3.1 adds one success-note slot per Manage list, 10-per-page pagination and a
+one-transaction `Card name, Grade` import to the character card panel, collapsible
+engraving grade sections, and a sticky Manage sidebar with scroll spying.
+
+No schema change: `user_version` stays 4, no migration is added, export stays
+`version: 4` and no dependency is added. All migrations were left untouched.
+
+## 2. Requirement checklist
+
+A. Manage add notes
+- [x] One note per list (Characters, Nests, Plates, Plate levels, Cards).
+- [x] Text `Added {name}.` / `Added Level {value}.`; hidden-by-search variant
+      `Added {name}. It is hidden by your current search.`
+- [x] Replaced on add, rename, delete or search change; cleared when Manage
+      unmounts. Typing in an input does not clear it.
+- [x] Add keeps the search, resets the page to 1. The plate-level amber
+      rank-shift warning stays a separate box.
+- [x] The Cards bulk-import summary shares the same slot.
+
+B. Character panel pagination
+- [x] A to Z sort, then a panel search over all owned cards, then pagination at
+      `PAGE_SIZE = 10` via `buildCharacterCardList` and the shared `Pagination`.
+- [x] "N of M cards" while filtering; footer only above 10.
+- [x] Page resets on search change, add and import; change grade and remove keep
+      the page, clamped by `paginate` plus the sync effect.
+- [x] One panel note slot: Added / Changed / Removed / import summary. Search
+      change replaces it; opening or cancelling the grade editor does not.
+
+C. Character panel import
+- [x] Inline `Import cards` block below the add form; pushes the list down.
+- [x] Hint `One card per line: Card name, Grade`; Import disabled for blank text;
+      Cancel closes and clears.
+- [x] Clean import closes and clears. Invalid lines stay in the textarea with
+      duplicates removed.
+- [x] Last-comma split, trimming, ASCII case-insensitive card names and grades,
+      empty lines ignored, all five invalid kinds.
+- [x] First valid occurrence wins; invalid lines do not claim their card.
+- [x] Existing grade is overwritten; same grade counts as unchanged.
+- [x] Valid operations apply in one transaction (`db.transaction`).
+- [x] `POST /api/character-cards/import { characterId, text }`, 100 KB default
+      body limit, 400 bad id/non-string text, 404 unknown character, counts plus
+      `invalidLines`.
+- [x] Note format: zero clauses omitted, `Imported: nothing changed.`, duplicate
+      and invalid clauses with singular/plural.
+
+D. Manage engraving accordions
+- [x] One collapsible section per grade, closed by default.
+- [x] All four grades render when the category has values; a wholly empty
+      category keeps the single empty message.
+- [x] Open state is per category and lasts while Manage is mounted.
+- [x] Add/edit/delete never collapse a section and never auto-open one.
+- [x] Native button with `aria-expanded` / `aria-controls`, panels keep
+      `hidden`, visible focus style.
+- [x] The add-value form and its errors were already above the grade list, so
+      they remain reachable while every section is closed.
+
+E. Manage sidebar
+- [x] Links in page order: Characters, Nests, Plates, Plate levels, Engraving
+      values, Cards. Buttons, not hash anchors, so Manage routing is unaffected.
+- [x] Smooth scroll with a header-aware `scroll-margin-top` gap.
+- [x] Active section via a rAF-throttled positional spy; clicked link is set
+      immediately and kept during the smooth scroll.
+- [x] Sticky below the app header on large screens; scrollable chip row below
+      `lg`.
+- [x] `prefers-reduced-motion` uses instant scrolling.
+- [x] Positioning uses `--app-header-height`, published by `AppShell` with a
+      `5rem` fallback.
+
+F. Tests and docs
+- [x] Vitest + supertest only; no jsdom or RTL.
+- [x] Pure import planner tests, endpoint tests, rollback test, web helper tests.
+- [x] CLAUDE.md and README.md updated and audited.
+- [x] This v3.3.1 report appended; earlier reports kept.
+
+## 3. Post-approval changes
+
+1. **Manage order.** Section order is now Characters, Nests, Plates, Plate
+   levels, Engraving values, Cards, in both the page and the sidebar. Plates and
+   Plate levels were swapped from the previous two-column layout.
+2. **Panel before/after.** Before: header/count, note, error, search + count,
+   card list, Add card section. After: header/count, note, error, Add card +
+   Import cards block, card search, paginated list. The move was necessary so
+   the import textarea pushes the list down instead of covering it.
+3. **Engraving add form.** Verified before implementing that it is outside the
+   grade panels (`EngravingValuesSection.tsx`, form before the grade list). It
+   stays there, so no extra fix was needed.
+4. **Import close guard.** While the import textarea contains non-whitespace
+   text, Escape, backdrop clicks and the panel close button do not close the
+   panel. Only Cancel clears the text. When the text is empty (or
+   whitespace-only) normal Escape/backdrop/close behavior returns. On narrow
+   screens the panel is a centered dialog with internal scrolling; the same
+   guard applies because it is state-based, not layout-based. The close button
+   is disabled rather than silently discarding text.
+5. **Removed note.** Now `Removed {card} from {character}.` with the trailing
+   period; the helper test asserts the exact string.
+6. **Scrolling assumptions confirmed.** The app uses window/document scrolling
+   (no page-level overflow container); `AppShell` renders `<header
+   className="sticky top-0 ...">`. The implementation therefore relies on
+   `--app-header-height` and window scroll, with a 1200 ms scroll-lock fallback.
+7. **Invalid-line persistence.** CLAUDE.md documents that an invalid line stays
+   in the textarea and that re-importing it later overwrites a grade that a
+   later valid line applied for the same card.
+
+## 4. Files
+
+Server:
+- `server/src/cards.ts` — `matchCardGrade`, import plan types and
+  `planCharacterCardImport`.
+- `server/src/cardsData.ts` — `importCharacterCards` (single transaction).
+- `server/src/routes/cards.ts` — `POST /api/character-cards/import`.
+- `server/tests/cards.test.ts`, `server/tests/cards-api.test.ts`.
+
+Web:
+- `web/src/api/types.ts`, `web/src/api/client.ts` — result type and client call.
+- `web/src/lib/notes.ts`, `web/src/lib/manageSections.ts` (new).
+- `web/src/lib/cards.ts` — `buildCharacterCardList`,
+  `formatCharacterCardImportSummary`.
+- `web/src/components/EntitySection.tsx`, `PlateLevelSection.tsx`,
+  `CardsSection.tsx`, `CardCharacterPanel.tsx`,
+  `EngravingValuesSection.tsx`, `ManageSidebar.tsx` (new), `AppShell.tsx`.
+- `web/src/pages/ManagePage.tsx`, `web/src/index.css`.
+- `web/src/lib/notes.test.ts`, `manageSections.test.ts`, `cards.test.ts`.
+
+Docs: `CLAUDE.md`, `README.md`, `REVIEW.md`.
+
+## 5. Test results
+
+```text
+npm test       262 passed across 22 test files
+npm run lint   passed, no errors or warnings
+npm run build  passed server, dev server and web typechecks, plus Vite build
+```
+
+New coverage highlights:
+- Import planner: comma handling, case folding, invalid kinds and order,
+  first-valid-wins, invalid-does-not-claim, add/update/unchanged, ASCII-only
+  matching, empty text.
+- Endpoint: counts and `invalidLines`, state reflection, validation errors,
+  unknown character, duplicate/invalid lines, no `operations` field, 413 over
+  100 KB, and a trigger-forced second-row failure proving full rollback.
+- Web helpers: note text, panel list filtering/sorting/pagination/clamping,
+  import summary wording and pluralization, sidebar order and spy selection.
+
+## 6. Documentation audit
+
+v3.3.1 drift fixed in CLAUDE.md and README.md:
+- Manage order, notes, pagination and sidebar/accordion behavior.
+- Panel layout, panel notes, pagination and per-character import rules.
+- API summary entry for `POST /api/character-cards/import`.
+- Explicit confirmation that schema 4 and export version 4 are unchanged.
+- Code-rules helper list now includes `notes` and `manage sections`.
+
+Other checks that matched the code and needed no change: tab order, Manage list
+ordering and page-reset rules, `Pagination` hiding at 10 or fewer, the 100 KB
+default JSON limit, the finder order, and backup/export/import behavior.
+
+Recorded, not changed (pre-existing, non-v3.3.1):
+- `package.json` still reports version `1.0.0` while docs use v3.x feature
+  labels.
+- `server/src/seed-dev.ts` calls `new Date()` in the dev-only entry script.
+
+## 7. Manual acceptance checklist (not run as browser automation)
+
+- Add each Manage record type and confirm the note, hidden-by-search variant,
+  page reset and note clearing.
+- Confirm the plate-level note and amber rank-shift box can both appear.
+- Open/close engraving grades, switch category and return, then add/edit/delete
+  and confirm sections keep their state.
+- Scroll Manage and confirm the highlighted section, chip row on narrow width,
+  sticky sidebar, click lock without flicker, and reduced-motion behavior.
+- In the character panel: paginate, search, add, change grade, remove, and
+  confirm the one note slot and its wording.
+- Import a clean paste, a partially invalid paste and a duplicate paste; confirm
+  counts, textarea contents and the textarea close guard.
+- Verify Escape/backdrop/close are blocked only while the textarea has text.
+
+## 8. Open points
+
+- The close button is disabled while the import textarea has text, which is
+  stricter than the Escape/backdrop rule but consistent with "only Cancel
+  clears".
+- The Cards Manage note renders near the add form, not beneath the bulk-import
+  form; both actions share the same single slot.
+- Whitespace-only import text returns 200 with zero counts; the Import button
+  is disabled in that state.
+- The import entry point is hidden only when the card catalog is empty, so
+  characters who already own every card can still import grade changes.

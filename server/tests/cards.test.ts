@@ -5,7 +5,9 @@ import {
   compareCardNames,
   findCardCandidates,
   isLowerCardGrade,
+  matchCardGrade,
   planBulkCardImport,
+  planCharacterCardImport,
   sortCardCatalog,
 } from '../src/cards';
 import type {
@@ -166,6 +168,167 @@ describe('planBulkCardImport', () => {
       added: 0,
       skipped: 0,
       invalid: 0,
+    });
+  });
+});
+
+describe('matchCardGrade', () => {
+  it('trims and matches ASCII case-insensitively', () => {
+    expect(matchCardGrade(' Magic ')).toBe('magic');
+    expect(matchCardGrade('LEGEND')).toBe('legend');
+    expect(matchCardGrade('Epic')).toBe('epic');
+    expect(matchCardGrade('Mythic')).toBeNull();
+    expect(matchCardGrade('')).toBeNull();
+  });
+});
+
+describe('planCharacterCardImport', () => {
+  const catalog = [
+    card(1, 'Red Dragon'),
+    card(2, 'Blue Dragon, Fire'),
+    card(3, 'Gold Dragon'),
+  ];
+
+  it('splits on the last comma and matches names and grades case-insensitively', () => {
+    const plan = planCharacterCardImport(
+      ' red dragon , epic \nBLUE DRAGON, FIRE, LEGEND\n',
+      catalog,
+      1,
+      [],
+    );
+
+    expect(plan).toEqual({
+      operations: [
+        { cardId: 1, cardName: 'Red Dragon', grade: 'epic' },
+        { cardId: 2, cardName: 'Blue Dragon, Fire', grade: 'legend' },
+      ],
+      added: 2,
+      updated: 0,
+      unchanged: 0,
+      duplicates: 0,
+      invalid: 0,
+      invalidLines: [],
+    });
+  });
+
+  it('ignores empty lines and reports every invalid kind in order', () => {
+    const plan = planCharacterCardImport(
+      [
+        '',
+        'Missing Comma',
+        ', Epic',
+        'Red Dragon,',
+        'Unknown Card, Epic',
+        'Red Dragon, Mythic',
+        '   ',
+      ].join('\n'),
+      catalog,
+      1,
+      [],
+    );
+
+    expect(plan.added).toBe(0);
+    expect(plan.invalid).toBe(5);
+    expect(plan.invalidLines).toEqual([
+      'Missing Comma',
+      ', Epic',
+      'Red Dragon,',
+      'Unknown Card, Epic',
+      'Red Dragon, Mythic',
+    ]);
+  });
+
+  it('counts added, updated and unchanged against existing rows', () => {
+    const rows = [entry(1, 3, 'rare'), entry(2, 3, 'legend')];
+
+    const unchanged = planCharacterCardImport(
+      'Gold Dragon, Rare',
+      catalog,
+      1,
+      rows,
+    );
+    expect(unchanged.unchanged).toBe(1);
+    expect(unchanged.operations).toEqual([]);
+
+    const updated = planCharacterCardImport(
+      'Gold Dragon, Legend',
+      catalog,
+      1,
+      rows,
+    );
+    expect(updated.updated).toBe(1);
+    expect(updated.operations).toEqual([
+      { cardId: 3, cardName: 'Gold Dragon', grade: 'legend' },
+    ]);
+  });
+
+  it('lets the first valid occurrence win and counts later lines as duplicates', () => {
+    const plan = planCharacterCardImport(
+      'Red Dragon, Epic\nred dragon, Legend\nRed Dragon, Mythic',
+      catalog,
+      1,
+      [],
+    );
+
+    expect(plan.added).toBe(1);
+    expect(plan.duplicates).toBe(2);
+    expect(plan.invalid).toBe(0);
+    expect(plan.operations).toEqual([
+      { cardId: 1, cardName: 'Red Dragon', grade: 'epic' },
+    ]);
+  });
+
+  it('does not let an invalid line claim a card for a later valid line', () => {
+    const plan = planCharacterCardImport(
+      'Red Dragon, Mythic\nRed Dragon, Legend',
+      catalog,
+      1,
+      [],
+    );
+
+    expect(plan.invalid).toBe(1);
+    expect(plan.added).toBe(1);
+    expect(plan.duplicates).toBe(0);
+    expect(plan.invalidLines).toEqual(['Red Dragon, Mythic']);
+    expect(plan.operations).toEqual([
+      { cardId: 1, cardName: 'Red Dragon', grade: 'legend' },
+    ]);
+  });
+
+  it('ignores rows belonging to other characters', () => {
+    const plan = planCharacterCardImport(
+      'Gold Dragon, Rare',
+      catalog,
+      7,
+      [entry(1, 3, 'rare')],
+    );
+
+    expect(plan.added).toBe(1);
+    expect(plan.unchanged).toBe(0);
+  });
+
+  it('uses ASCII-only name folding like NOCASE', () => {
+    const plan = planCharacterCardImport(
+      'äther, Epic',
+      [card(9, 'Äther')],
+      1,
+      [],
+    );
+
+    expect(plan.added).toBe(0);
+    expect(plan.invalid).toBe(1);
+    expect(plan.invalidLines).toEqual(['äther, Epic']);
+  });
+
+  it('returns zero counts for empty or whitespace-only text', () => {
+    expect(planCharacterCardImport(' \r\n\t', catalog, 1, [])).toEqual({
+      operations: [],
+      added: 0,
+      updated: 0,
+      unchanged: 0,
+      duplicates: 0,
+      invalid: 0,
+      invalidLines: [],
     });
   });
 });

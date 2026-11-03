@@ -58,6 +58,24 @@ before using `start.bat`.
 | `npm run lint`     | Run ESLint                                                                                    |
 | `npm run seed:dev` | Fill `data-dev/` with sample characters, nests and runs (see the note below) |
 
+## Manage page
+
+- The page lists six sections in this order: Characters, Nests, Plates, Plate
+  levels, Engraving values, Cards. On wide screens a sticky sidebar links to
+  each section and highlights the section in view; on narrow screens the links
+  form a scrollable chip row.
+- Adding an item shows a note such as `Added Raven.` or `Added Level 70.`.
+  There is one note per list, replaced by the next add, rename, delete or
+  search change. If the active search hides the new record, the note says so.
+  The Cards bulk-import summary uses the same slot.
+- Lists paginate at 10 records per page. Characters, nests and plates are
+  newest first, plate levels highest first, and cards A to Z.
+- Engraving values are grouped into one collapsible section per grade. When a
+  category has data, all four grades are shown, including empty ones. Sections
+  start closed, remember their open state per category while you stay on
+  Manage, and are never collapsed by adding, editing or deleting a value. The
+  add-value form stays above the grade sections.
+
 ## Data and backups
 
 - Production database: `data/app.db` (SQLite, WAL mode).
@@ -157,7 +175,8 @@ For development data, repeat the same steps using `data-dev/` and
   characters with an empty slot or a lower value; equal or higher values are
   excluded.
 - Add, edit, and delete engraving values on the Manage page, grouped into the
-  four category tabs. Deleting a value in use is blocked.
+  four category tabs and collapsible grade sections. Deleting a value in use is
+  blocked.
 - Editing a value's first stat can change its row order and the finder's
   lower-than results.
 - The Dashboard lists characters with the most empty engraving slots.
@@ -177,12 +196,27 @@ For development data, repeat the same steps using `data-dev/` and
 - Below the finder is the character list with a card count per character. Click
   a character to open their card panel, where you can add a card, change its
   grade (up or down), or remove it. Removing a card is immediate.
+- The character panel lists cards A to Z, 10 per page, with its own search over
+  all of that character's cards. Panel notes report the last action (`Added`,
+  `Changed`, `Removed`, or an import summary) until the next panel action, a
+  search change, or closing the panel.
 - Bulk import: paste card names, one per line. Names that already exist or are
   repeated in the paste are skipped, empty lines are ignored, and names over 50
   characters are reported as invalid. Valid names are always added, and the
   result is a short summary. If any line is invalid, the pasted text stays in
   the box so it can be corrected; re-importing is safe because existing names
   are skipped. The bulk import request is limited to 100 KB.
+- Import cards for one character: in the character panel, choose Import cards
+  and paste one `Card name, Grade` per line. Each line splits on its last
+  comma, so card names may contain commas. Names and grades are matched
+  case-insensitively (ASCII only); empty lines are ignored. Unknown cards,
+  unknown grades, lines without a comma, and empty names or grades are invalid.
+  When a card appears more than once, the first valid line wins and later lines
+  are skipped as duplicates. Existing grades are overwritten and the import is
+  applied in one transaction. Invalid lines stay in the box (duplicates
+  removed) for correction. A line imported later still overwrites a grade that
+  a following valid line applied for the same card. The request is limited to
+  100 KB.
 - The Manage card list is sorted A to Z, 10 per page, with search over all cards.
   Characters, nests and plates keep newest first; plate levels stay highest
   value first.

@@ -2,14 +2,17 @@ import { describe, expect, it } from 'vitest';
 import type {
   CardCatalogEntry,
   CharacterCardEntry,
+  CharacterCardImportResult,
 } from '../api/types';
 import {
   buildCardOptions,
+  buildCharacterCardList,
   filterCardOptions,
   filterCards,
   filterCharacterCards,
   formatCardCount,
   formatCardImportSummary,
+  formatCharacterCardImportSummary,
   sortCardsAZ,
   sortCharacterCardEntries,
 } from './cards';
@@ -97,6 +100,115 @@ describe('formatting', () => {
       formatCardImportSummary({ added: 2, skipped: 0, invalid: 3 }),
     ).toBe(
       'Added 2, skipped 0 already existing. 3 invalid lines not added.',
+    );
+  });
+});
+
+describe('buildCharacterCardList', () => {
+  function ownedEntry(
+    characterId: number,
+    cardId: number,
+    cardName: string,
+  ): CharacterCardEntry {
+    return { characterId, cardId, cardName, grade: 'rare' };
+  }
+
+  const entries = [
+    ownedEntry(2, 1, 'Zulu'),
+    ownedEntry(1, 9, 'Zeta'),
+    ownedEntry(1, 2, 'Alpha'),
+    ...Array.from({ length: 22 }, (_, index) =>
+      ownedEntry(1, 100 + index, `Card ${String(index).padStart(2, '0')}`),
+    ),
+  ];
+
+  it('keeps only the character, sorts A to Z, and paginates by 10', () => {
+    const result = buildCharacterCardList(entries, 1, '', 1);
+
+    expect(result.owned).toHaveLength(24);
+    expect(result.filtered).toHaveLength(24);
+    expect(result.paged.items).toHaveLength(10);
+    expect(result.paged.items.map((item) => item.cardName)).toEqual([
+      'Alpha',
+      'Card 00',
+      'Card 01',
+      'Card 02',
+      'Card 03',
+      'Card 04',
+      'Card 05',
+      'Card 06',
+      'Card 07',
+      'Card 08',
+    ]);
+    expect(result.paged.pageCount).toBe(3);
+    expect(result.owned.some((item) => item.characterId === 2)).toBe(false);
+  });
+
+  it('searches every owned card before paginating and clamps the page', () => {
+    const result = buildCharacterCardList(entries, 1, 'card 21', 99);
+
+    expect(result.owned).toHaveLength(24);
+    expect(result.filtered.map((item) => item.cardName)).toEqual(['Card 21']);
+    expect(result.paged.page).toBe(1);
+    expect(result.paged.items[0]?.cardName).toBe('Card 21');
+  });
+
+  it('returns an empty page for an unknown character', () => {
+    const result = buildCharacterCardList(entries, 99, '', 3);
+
+    expect(result.owned).toEqual([]);
+    expect(result.filtered).toEqual([]);
+    expect(result.paged.page).toBe(1);
+    expect(result.paged.items).toEqual([]);
+  });
+});
+
+describe('formatCharacterCardImportSummary', () => {
+  function result(
+    overrides: Partial<CharacterCardImportResult> = {},
+  ): CharacterCardImportResult {
+    return {
+      added: 0,
+      updated: 0,
+      unchanged: 0,
+      duplicates: 0,
+      invalid: 0,
+      invalidLines: [],
+      ...overrides,
+    };
+  }
+
+  it('lists only nonzero clauses in a fixed order', () => {
+    expect(
+      formatCharacterCardImportSummary(
+        result({ added: 12, updated: 3, unchanged: 2 }),
+      ),
+    ).toBe('Imported: added 12, updated 3, unchanged 2.');
+    expect(formatCharacterCardImportSummary(result({ added: 12 }))).toBe(
+      'Imported: added 12.',
+    );
+  });
+
+  it('reports nothing changed when every apply count is zero', () => {
+    expect(formatCharacterCardImportSummary(result())).toBe(
+      'Imported: nothing changed.',
+    );
+  });
+
+  it('appends duplicate and invalid clauses with pluralization', () => {
+    expect(
+      formatCharacterCardImportSummary(
+        result({ added: 1, duplicates: 1, invalid: 1 }),
+      ),
+    ).toBe(
+      'Imported: added 1. 1 duplicate line skipped. 1 line not added.',
+    );
+    expect(
+      formatCharacterCardImportSummary(
+        result({ duplicates: 2, invalid: 2 }),
+      ),
+    ).toBe(
+      'Imported: nothing changed. 2 duplicate lines skipped. 2 lines not added.',
     );
   });
 });

@@ -8,6 +8,7 @@ import type {
   CardUsageResponse,
   Character,
   CharacterCardEntry,
+  CharacterCardImportResult,
   EngravingAffectedSlot,
   EngravingCategory,
   EngravingFinderResult,
@@ -293,6 +294,12 @@ export const api = {
     request<{ entry: CharacterCardEntry }>('/api/character-cards', {
       method: 'PUT',
       body: jsonBody(input),
+    }),
+
+  importCharacterCards: (characterId: number, text: string) =>
+    request<CharacterCardImportResult>('/api/character-cards/import', {
+      method: 'POST',
+      body: JSON.stringify({ characterId, text }),
     }),
 
   removeCharacterCard: (characterId: number, cardId: number) =>
