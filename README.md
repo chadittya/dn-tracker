@@ -11,7 +11,7 @@ when it was recorded for the current week.
 ## Requirements
 
 - Node.js 22.12 or newer within 22.x, 24.x, or 26+ (tested on Node
-  24.20.0)
+  26.13.1)
 - npm
 
 ## First-time setup
@@ -20,8 +20,19 @@ when it was recorded for the current week.
 npm install
 ```
 
-`better-sqlite3` ships prebuilt binaries for common platforms, including
-Windows x64. No C++ build tools are needed.
+On Windows, `better-sqlite3` may compile from source with `node-gyp`. If
+`npm install` fails with a "Could not find any Visual Studio installation"
+error:
+
+1. Install Visual Studio 2022 Build Tools with the "Desktop development with
+   C++" workload.
+2. Approve the install scripts for `better-sqlite3` and `esbuild`:
+   `npm install-scripts approve better-sqlite3` and
+   `npm install-scripts approve esbuild`.
+3. Run `npm install` again.
+
+The approvals are saved in `package.json` under `allowScripts`, so they stay
+with the project.
 
 ## Run in development
 

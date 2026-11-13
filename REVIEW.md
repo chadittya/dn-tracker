@@ -1375,3 +1375,104 @@ npm run build  passed typechecks and Vite build
 - Check the last section at page bottom and a click on the first section at the
   top of the page.
 - Repeat with reduced motion enabled and on a narrow viewport.
+
+---
+
+## Node 26.13.1 upgrade (docs only)
+
+### Context
+
+The development machine moved from Node 24.20.0 to Node 26.13.1 (November 11
+2026 security release). On Windows, `better-sqlite3` 13.0.3 compiled from
+source with `node-gyp`, which required Visual Studio 2022 Build Tools with the
+"Desktop development with C++" workload. Install scripts were approved for
+`better-sqlite3` and `esbuild`. No application code, schema, migration or
+dependency version was changed.
+
+### Documentation changes
+
+- `README.md` — "Requirements" now records Node 26.13.1 as the tested version.
+- `README.md` — "First-time setup" no longer claims `better-sqlite3` always
+  uses prebuilt binaries with no C++ toolchain. It now documents the Windows
+  `node-gyp` "Could not find any Visual Studio installation" case: install
+  Visual Studio 2022 Build Tools with the C++ workload, run
+  `npm install-scripts approve better-sqlite3` and
+  `npm install-scripts approve esbuild`, then run `npm install` again.
+- `CLAUDE.md` — records no Node version, so it needed no change.
+
+### Install-script approvals (reported, not edited here)
+
+The approvals are already committed in `7c9a8ac`; the working tree was clean
+before the README edits.
+
+- `package.json` — added `allowScripts` with two pinned entries:
+  `"better-sqlite3@13.0.3": true` and `"esbuild@0.28.2": true`.
+- `package-lock.json` — one line added to the `better-sqlite3` 13.0.3 package
+  entry: `"hasInstallScript": true`. `esbuild` gained no lockfile change in
+  this commit.
+- No `.npmrc` exists and no other file was touched.
+
+### Documentation audit against code
+
+Verified true against the code, no change needed:
+
+- Express body limits: 25 MB only for `POST /api/data/import`, default limit
+  elsewhere, 100 KB for both card imports (`server/src/app.ts:60-68`).
+- Schema `user_version` 4, four migrations in one transaction, newer schema
+  refused (`server/src/migrations.ts:9-138`).
+- `PAGE_SIZE = 10` for every Manage list and the character card panel
+  (`web/src/lib/pagination.ts:1`).
+- Tab order (`web/src/lib/navigation.ts:22-31`).
+- `seed:dev` guard and behavior (`server/src/seed-dev.ts:15-30,64-66`).
+- Backup cadence and retention 14/5 (`server/src/backup.ts:15-17`).
+- Saturday 08:00 WIB week logic (`server/src/week.ts:34-61`).
+- 136 seeded engraving values (`server/src/engravingSeed.ts:81`).
+- Bind to `127.0.0.1`, single port, `data-dev/` vs `data/`
+  (`server/src/config.ts:27-41`).
+- Export `version: 4` and the per-version import matrix
+  (`server/src/transfer.ts:107,495-610`).
+- Every route listed in the CLAUDE.md API summary exists; no undocumented
+  route.
+- Error shape and JSON 404 for unknown `/api/*` (`server/src/errors.ts:63-95`,
+  `server/src/app.ts:92-96`).
+- Slot counts 8 and 14 and the slot/category labels
+  (`server/src/heraldry.ts:3`, `server/src/engraving.ts:3,37-52`).
+- Build/start scripts and `dist/web` output (`package.json:9-10`).
+- Test count: 22 files and 268 tests is consistent with the `it.each`
+  expansions.
+
+Mismatches found, reported and not changed:
+
+- `README.md`/`CLAUDE.md` card grade colors are approximate: "Epic yellow" is
+  rendered as amber, "Rare blue" as indigo, "Unique purple" as fuchsia
+  (`web/src/lib/engravingColors.ts:69-84`). These are hue descriptions, not
+  behavior; left as written to avoid churn.
+- `start.bat:8` still says "Install Node.js 22.12 or newer" (a minimum only,
+  no upper range). It is a launcher script, not documentation, so it was left
+  unchanged; it remains compatible with the README range.
+- `Project_Context_v1.md:39` records `Node 24.15.0, npm 11.12.1`. The file is
+  gitignored and is a local snapshot, so it was left unchanged.
+- `@types/node` is `^24.19.2` while the runtime is Node 26. This is a
+  dependency decision, out of scope for a docs-only change and not edited.
+- `package.json` has no `engines` field, so the README Node range is not
+  enforced by npm. Recorded only.
+- `REVIEW.md:1103-1104` keeps the historical mention of Node 24.20.0 because
+  it describes the earlier fix; this section supersedes it.
+
+### Verification (reported on the dev machine)
+
+```text
+npm run build  passed
+npm test       268 passed across 22 test files
+npm run lint   passed
+```
+
+These results were reported for Node 26.13.1 and were not re-run for this
+docs-only change; no code changed.
+
+### Manual checklist
+
+- Fresh Windows clone on Node 26.13.1: `npm install` either uses a compatible
+  prebuilt binary or compiles after the Build Tools step above.
+- `npm run dev` serves on port 3000 from the same server.
+- README renders the numbered Windows step list correctly.
